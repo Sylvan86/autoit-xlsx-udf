@@ -1,13 +1,13 @@
-#include <Array.au3>
+#include <Date.au3>
 
-
-$iT = TimerInit()
-$aZellen = _xlsx_2Array(@ScriptDir & "\Umsätze_2020-07-22.xlsx", 1)
-$iT = TimerDiff($iT)
-
-ConsoleWrite($iT & @CRLF)
-_ArrayDisplay($aZellen)
-
+; #INDEX# =======================================================================================================================
+; Title .........: xlsxNative
+; Version .......: 0.1
+; AutoIt Version : 3.3.14.5
+; Language ......: English
+; Description ...: Functions to read data from Excel-xlsx files without the need of having excel installed
+; Author(s) .....: AspirinJunkie
+; ===============================================================================================================================
 
 
 
@@ -30,7 +30,7 @@ Func _xlsx_2Array(Const $sFile, Const $sSheetNr = 1)
 	Local $pthStrings = $pthWorkDir & "xl\sharedStrings.xml"
 
 	; unpack xlsx-file
-	__unzip($sFile, $pthWorkDir)
+	__unzip($sFile, $pthWorkDir, "shared*.xml sheet*.xml")
 	If @error Then Return SetError(3, @error, False)
 
 	Local $pthSheet = FileExists($pthWorkDir & "xl\worksheets\sheet.xml") ? $pthWorkDir & "xl\worksheets\sheet.xml" : $pthWorkDir & "xl\worksheets\sheet" & $sSheetNr & ".xml"
@@ -127,6 +127,7 @@ Func __xlsx_readCells(Const $sFile, ByRef $aStrings)
 			$sValue = $aStrings[Int(__xmlSingleText($oCell, $sXPathValue))]
 		Else ; normal value
 			$sValue = __xmlSingleText($oCell, $sXPathValue)
+			If StringRegExp($sValue, '(?i)\A(?|0x\d+|[-+]?(?>\d+)(?>\.\d+)?(?:e[-+]?\d+)?)\Z') Then $sValue = Number($sValue) ; if number then convert to number type
 		EndIf
 		$aCoords = __xlsx_CellstringToRowColumn($sR)
 
@@ -152,7 +153,7 @@ EndFunc   ;==>__xlsx_readCells
 ; =================================================================================================
 Func __xlsx_readSharedStrings(Const $sFile)
 	Local $oXML = ObjCreate("Microsoft.XMLDOM")
-	If Not IsObj($oXML) Then Return SetError(1,0,False)
+	If Not IsObj($oXML) Then Return SetError(1, 0, False)
 	$oXML.Async = False
 	$oXML.resolveExternals = False
 	$oXML.validateOnParse = False
@@ -189,81 +190,49 @@ Func __xlsx_CellstringToRowColumn($sID)
 	Return $aRet
 EndFunc   ;==>__xlsx_CellstringToRowColumn
 
+; converts excel date value to array [year, month, day, hour, minute, second]
+Func __xlsxExcel2Date($dExcelDate)
+	Local $aRet[6]
+	Local $fTimeRaw = $dExcelDate - Int($dExcelDate)
+
+	_DayValueToDate(2415018.5 + Int($dExcelDate), $aRet[0], $aRet[1], $aRet[2])
+
+	; process the time
+	$aRet[3] = Floor($fTimeRaw * 24)
+	$fTimeRaw -= $aRet[3] / 24    ; = Mod($fTimeRaw, 1/24)
+	$aRet[4] = Floor($fTimeRaw * 1440)
+	$fTimeRaw -= $aRet[4] / 1440
+	$aRet[5] = Floor($fTimeRaw * 86400)
+
+	Return $aRet
+EndFunc   ;==>__xlsxExcel2Date
+
 #EndRegion xlsx specific helper functions
 
 
 
 #Region general helper functions
-Func __unzip($sInput, $sOutput, Const $SOpts = "")
+
+Func __unzip($sInput, $sOutput, Const $sPattern = "")
 	If Not FileExists($sInput) Then Return SetError(1, @error, False)
 	$sOutput = StringRegExpReplace($sOutput, '(\\*)$', '')
 	If Not StringInStr(FileGetAttrib($sOutput), 'D', 1) Then
 		If Not DirCreate($sOutput) Then Return SetError(1, @error, False)
 	EndIf
 
-	Return __RunCmd("unzip", $SOpts & ' ' & __QiN($sInput) & " -d " & __QiN($sOutput))
-EndFunc   ;==>__unzip
+	If FileExists("7za.exe") Then
+		Local $dRet = RunWait(StringFormat('7za.exe x "%s" -o"%s" %s -r -tzip -bd -bb0 -aoa', $sInput, $sOutput, $sPattern), "", @SW_HIDE)
+		Return $dRet = 0 ? True : SetError(2, $dRet, False)
 
-; adds quotes if white spaces and escapes tabs and vertical space
-Func __QiN($s_String, Const $s_Quote = '"', Const $s_QEscape = '""', Const $s_TabEscape = Default, Const $s_LineEscape = Default)
-	; by AspirinJunkie
+	Else ; much slower
+		FileCopy($sInput, @TempDir & "\tmp.zip")
 
-	; escape line breaks
-	If $s_LineEscape <> Default Then $s_String = StringRegExpReplace($s_String, '(\v)+', $s_LineEscape)
-
-	; escape tabs
-	If $s_TabEscape <> Default Then $s_String = StringRegExpReplace($s_String, '(\t)+', $s_TabEscape)
-
-	; quotes around if necessary
-	If StringInStr($s_String, ' ', 1) Then Return $s_Quote & StringReplace($s_String, $s_Quote, $s_QEscape, 0, 1) & $s_Quote
-
-	Return $s_String
-EndFunc   ;==>__QiN
-
-; #FUNCTION# ======================================================================================
-; Name ..........: __RunCmd()
-; Description ...: runs commandline programs or cmd-command and return their output
-; Syntax ........: __RunCmd($s_Cmd, [$sParameter = '', [$b_CmdSpec = False, [$WorkDir = @WorkingDir]]])
-; Parameters ....: $s_Cmd        - the command which should be executed (can be full command or without parameters)
-;                  $sParameter   - additional parameters for the command
-;                  $b_CmdSpec    - If true the command is interpreted as a command for cmd.exe
-;                  $WorkDir      - the working directory
-; Return values .: Success: returns a string with the output
-;                  Failure: set @error and returns a debug-string
-; Author ........: AspirinJunkie
-; =================================================================================================
-Func __RunCmd($s_Cmd, $sParameter = '', $b_CmdSpec = False, $WorkDir = @WorkingDir)
-	Local Static $h_User32DLL = DllOpen('user32.dll')
-	If @error Then Return SetError(1, @error, "")
-
-	If $b_CmdSpec Then $s_Cmd = @ComSpec & " /c " & $s_Cmd
-
-	Local $s_Ret, $s_Line, $s_Err
-
-	If $sParameter <> '' Then $sParameter = ' ' & $sParameter
-	Local $iPID = Run($s_Cmd & $sParameter, $WorkDir, @SW_HIDE, 0x2 + 0x4)
-	If @error Then Return SetError(2, @error, "")
-
-	Do
-		Sleep(10)
-		$s_Line = StdoutRead($iPID)
-		If @extended > 0 Then $s_Ret &= $s_Line
-	Until @error
-
-	Do
-		Sleep(10)
-		$s_Line = StderrRead($iPID)
-		If @extended > 0 Then $s_Err &= $s_Line
-	Until @error
-
-	$s_Ret = DllCall($h_User32DLL, 'BOOL', 'OemToChar', 'str', $s_Ret, 'str', '')[2]
-
-	If $s_Err <> "" Then
-		If $s_Ret <> "" Then Return SetError(3, 0, "------- StdOut -----------" & @CRLF & $s_Ret & @CRLF & @CRLF & "------- StdErr -----------" & @CRLF & $s_Err)
-		Return SetError(3, 0, $s_Err)
+		Local Static $oShell = ObjCreate("Shell.Application")
+		$oShell.Namespace($sOutput).CopyHere($oShell.Namespace(@TempDir & "\tmp.zip").Items)
+		FileDelete(@TempDir & "\tmp.zip")
 	EndIf
-	Return $s_Ret
-EndFunc   ;==>__RunCmd
+	Return 1
+EndFunc   ;==>__unzip
 
 ; returns single from a xml-dom-object and handles errors
 Func __xmlSingleText(ByRef $oXML, Const $sXPath)
