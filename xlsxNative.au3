@@ -14,9 +14,11 @@
 ; #FUNCTION# ======================================================================================
 ; Name ..........: _xlsx_2Array
 ; Description ...: reads single worksheets of an Excel xlsx-file into an array
-; Syntax ........: _xlsx_2Array(Const $sFile [, Const $sSheetNr = 1])
+; Syntax ........: _xlsx_2Array(Const $sFile [, Const $sSheetNr = 1 [, $dRowFrom = 1 [, $dRowTo = Default]]])
 ; Parameters ....: $sFile      - path-string of the xlsx-file
 ;                  $sSheetNr   - number (1-based) of the target worksheet
+;                  $dRowFrom   - row number (1-based) where to start the extraction
+;                  $dRowTo   - row number (1-based) where to stop the extraction
 ; Return values .: Success - Return 2D-Array with the worksheet content
 ;                  Failure - Return False and set @error to:
 ;        				@error = 1 - error importing shared-string list (@extended = @error of __xlsx_readSharedStrings)
@@ -25,9 +27,16 @@
 ; Author ........: AspirinJunkie
 ; Last changed ..: 2020-07-27
 ; =================================================================================================
-Func _xlsx_2Array(Const $sFile, Const $sSheetNr = 1)
+Func _xlsx_2Array(Const $sFile, Const $sSheetNr = 1, $dRowFrom = 1, $dRowTo = Default)
 	Local $pthWorkDir = @TempDir & "\xlsxWork\"
 	Local $pthStrings = $pthWorkDir & "xl\sharedStrings.xml"
+
+	; correct wrong values for  $dRowFrom and $dRowTo
+	If $dRowFrom < 1 Or Not IsInt($dRowFrom) Then $dRowFrom = 1
+	If $dRowFrom > $dRowTo Then
+		$dRowFrom = 1
+		$dRowTo = Default
+	EndIf
 
 	; unpack xlsx-file
 	__unzip($sFile, $pthWorkDir, "shared*.xml sheet*.xml")
@@ -40,7 +49,7 @@ Func _xlsx_2Array(Const $sFile, Const $sSheetNr = 1)
 	If @error Then Return SetError(1, @error, False)
 
 	; read all cells into an 2D-array
-	Local $aCells = __xlsx_readCells($pthSheet, $aStrings)
+	Local $aCells = __xlsx_readCells($pthSheet, $aStrings, $dRowFrom, $dRowTo)
 	If @error Then Return SetError(2, @error, False)
 
 	; remove temporary data
@@ -55,9 +64,11 @@ EndFunc   ;==>_xlsx_2Array
 ; #FUNCTION# ======================================================================================
 ; Name ..........: __xlsx_readCells
 ; Description ...: import xlsx worksheet values
-; Syntax ........: __xlsx_readCells(Const $sFile, ByRef $aStrings)
+; Syntax ........: __xlsx_readCells(Const $sFile, ByRef $aStrings [, $dRowFrom = 1 [, $dRowTo = Default]])
 ; Parameters ....: $sFile      - path-string of the worksheet-xml
 ;                  $aStrings   - array with shared strings (return value of __xlsx_readSharedStrings)
+;                  $dRowFrom   - row number (1-based) where to start the extraction
+;                  $dRowTo   - row number (1-based) where to stop the extraction
 ; Return values .: Success - Return 2D-Array with the worksheet content
 ;                  Failure - Return False and set @error to:
 ;        				@error = 1 - cannot create XMLDOM-Object
@@ -67,22 +78,29 @@ EndFunc   ;==>_xlsx_2Array
 ; Author ........: AspirinJunkie
 ; Last changed ..: 2020-07-27
 ; =================================================================================================
-Func __xlsx_readCells(Const $sFile, ByRef $aStrings)
-	; Sheet einlesen
-	Local $oXML = ObjCreate("Microsoft.XMLDOM")
-	If Not IsObj($oXML) Then Return SetError(1, 0, False)
-	$oXML.Async = False
-	$oXML.resolveExternals = False
-	$oXML.validateOnParse = False
+Func __xlsx_readCells(Const $sFile, ByRef $aStrings, Const $dRowFrom = 1, Const $dRowTo = Default)
+	Local $oXML = __xlsx_getXMLObject()
 
 	If Not $oXML.load($sFile) Then Return SetError(2, 0, False)
 
-	If IsObj($oXML.selectSingleNode("/x:worksheet")) Then
-		$sXPath = '/x:worksheet/x:sheetData/x:row/x:c'
-		$sXPathValue = "x:v"
-	Else
+	Local $sXPathValue = "v", $sXPath
+	If $dRowFrom <> 1 Then
+		$sXPath = $dRowTo <> Default ? _
+			StringFormat('/worksheet/sheetData/row[@r >= %d and @r <= %d]/c', $dRowFrom, $dRowTo) : _
+			StringFormat('/worksheet/sheetData/row[@r >= %d]/c', $dRowFrom)
+	ElseIf $dRowTo <> Default Then
+			$sXPath = StringFormat('/worksheet/sheetData/row[@r <= %d]/c', $dRowTo)
+	Else ; full row range
 		$sXPath = '/worksheet/sheetData/row/c'
-		$sXPathValue = "v"
+	EndIf
+
+; special form of xml structure in some files
+	If IsObj($oXML.selectSingleNode("/x:worksheet")) Then
+		$sXPath = StringRegExpReplace($sXPath, '\/\K', 'x:')
+		$sXPath = StringRegExpReplace($sXPath, '@r', 'index()')
+		If $dRowFrom <> 1 Then $sXPath = StringRegExpReplace($sXPath, '(\b' & $dRowFrom & '\b)', $dRowFrom -1)
+		If $dRowTo <> Default Then $sXPath = StringRegExpReplace($sXPath, '(\b' & $dRowTo & '\b)', $dRowTo -1)
+		$sXPathValue = "x:v"
 	EndIf
 
 	Local $oCells = $oXML.selectNodes($sXPath)
@@ -112,7 +130,8 @@ Func __xlsx_readCells(Const $sFile, ByRef $aStrings)
 	EndIf
 
 	; create output array
-	Local $aRet[$dRowMax][$dColumnMax]
+	If $dRowTo <> Default Then $dRowMax = $dRowTo > $dRowMax ? $dRowMax : $dRowTo
+	Local $aRet[$dRowMax - $dRowFrom + 1][$dColumnMax]  ;
 
 	; read cell values
 	Local $i = 0
@@ -131,7 +150,7 @@ Func __xlsx_readCells(Const $sFile, ByRef $aStrings)
 		EndIf
 		$aCoords = __xlsx_CellstringToRowColumn($sR)
 
-		$aRet[$aCoords[1] - 1][$aCoords[0] - 1] = $sValue
+		$aRet[$aCoords[1] - $dRowFrom][$aCoords[0] - 1] = $sValue
 	Next
 
 	Return $aRet
@@ -152,11 +171,7 @@ EndFunc   ;==>__xlsx_readCells
 ; Last changed ..: 2020-07-27
 ; =================================================================================================
 Func __xlsx_readSharedStrings(Const $sFile)
-	Local $oXML = ObjCreate("Microsoft.XMLDOM")
-	If Not IsObj($oXML) Then Return SetError(1, 0, False)
-	$oXML.Async = False
-	$oXML.resolveExternals = False
-	$oXML.validateOnParse = False
+	Local $oXML = __xlsx_getXMLObject()
 
 	If Not $oXML.load($sFile) Then Return SetError(2, 0, False)
 
@@ -207,6 +222,24 @@ Func __xlsxExcel2Date($dExcelDate)
 	Return $aRet
 EndFunc   ;==>__xlsxExcel2Date
 
+; function to share one single xmldom-object over the functions but without beeing a global variable
+Func __xlsx_getXMLObject()
+	Local Static $c = 0
+	Local Static $oX = ObjCreate("Microsoft.XMLDOM")
+
+	If $c = 0 Then
+		With $oX
+			.Async = False
+			.resolveExternals = False
+			.validateOnParse = False
+			.SelectionLanguage = "XPath"
+			.ForcedResync = False
+		EndWith
+		$c = 1
+	EndIf
+	Return $oX
+EndFunc
+
 #EndRegion xlsx specific helper functions
 
 
@@ -228,7 +261,7 @@ Func __unzip($sInput, $sOutput, Const $sPattern = "")
 		FileCopy($sInput, @TempDir & "\tmp.zip")
 
 		Local Static $oShell = ObjCreate("Shell.Application")
-		$oShell.Namespace($sOutput).CopyHere($oShell.Namespace(@TempDir & "\tmp.zip").Items)
+		$oShell.Namespace($sOutput).CopyHere($oShell.Namespace(@TempDir & "\tmp.zip").Items, 4 + 16)
 		FileDelete(@TempDir & "\tmp.zip")
 	EndIf
 	Return 1

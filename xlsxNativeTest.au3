@@ -1,13 +1,16 @@
 #include <Array.au3>
-
 #include "xlsxNative.au3"
 
 
-;~ Global Const $sPathXlsxFile = 'H:\Administratives\Zeitenrechner.xlsm'
-;~ Global Const $sPathXlsxFile = @ScriptDir & "\Abteilungsausflug.xlsx"
-Global Const $sPathXlsxFile = @ScriptDir & "\Test.xlsx"
+$sXMLPath = 'Test.xlsx'
+;~ $sXMLPath = 'Abteilungsausflug.xlsx'
+;~ $sXMLPath = 'Umsätze_2020-07-22.xlsx'
 
-$aZellen = _xlsx_2Array($sPathXlsxFile, 2)
+$aWorksheet = _xlsx_2Array($sXMLPath, 1, 14, 15)
 
-_ArrayDisplay($aZellen)
+_ArrayDisplay($aWorksheet)
+
+
+
+
 
