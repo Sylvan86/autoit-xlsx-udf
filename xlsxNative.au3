@@ -40,7 +40,7 @@ Func _xlsx_2Array(Const $sFile, Const $sSheetNr = 1, $dRowFrom = 1, $dRowTo = De
 	EndIf
 
 	; unpack xlsx-file
-	__unzip($sFile, $pthWorkDir, "shared*.xml sheet*.xml")
+	__unzip($sFile, $pthWorkDir, "shared*.xml sheet.xml sheet" & $sSheetNr &  ".xml")
 	If @error Then Return SetError(3, @error, False)
 
 	Local $pthSheet = FileExists($pthWorkDir & "xl\worksheets\sheet.xml") ? $pthWorkDir & "xl\worksheets\sheet.xml" : $pthWorkDir & "xl\worksheets\sheet" & $sSheetNr & ".xml"
