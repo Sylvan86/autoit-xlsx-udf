@@ -2,11 +2,12 @@
 
 ; #INDEX# =======================================================================================================================
 ; Title .........: xlsxNative
-; Version .......: 0.1
+; Version .......: 0.2
 ; AutoIt Version : 3.3.14.5
 ; Language ......: English
 ; Description ...: Functions to read data from Excel-xlsx files without the need of having excel installed
 ; Author(s) .....: AspirinJunkie
+; Last changed ..: 2020-07.30
 ; ===============================================================================================================================
 
 
@@ -78,44 +79,25 @@ EndFunc   ;==>_xlsx_2Array
 ; Author ........: AspirinJunkie
 ; Last changed ..: 2020-07-27
 ; =================================================================================================
-Func __xlsx_readCells(Const $sFile, ByRef $aStrings, Const $dRowFrom = 1, Const $dRowTo = Default)
+Func __xlsx_readCells(Const $sFile, ByRef $aStrings, Const $dRowFrom = 1, $dRowTo = Default)
 	Local $oXML = __xlsx_getXMLObject()
 
 	If Not $oXML.load($sFile) Then Return SetError(2, 0, False)
 
-	Local $sXPathValue = "v", $sXPath
-	If $dRowFrom <> 1 Then
-		$sXPath = $dRowTo <> Default ? _
-			StringFormat('/worksheet/sheetData/row[@r >= %d and @r <= %d]/c', $dRowFrom, $dRowTo) : _
-			StringFormat('/worksheet/sheetData/row[@r >= %d]/c', $dRowFrom)
-	ElseIf $dRowTo <> Default Then
-			$sXPath = StringFormat('/worksheet/sheetData/row[@r <= %d]/c', $dRowTo)
-	Else ; full row range
-		$sXPath = '/worksheet/sheetData/row/c'
-	EndIf
+; determine the namespace prefix:
+	Local $sPre = $oXML.documentElement.prefix
+	If $sPre <> "" Then $sPre &= ":"
 
-; special form of xml structure in some files
-	If IsObj($oXML.selectSingleNode("/x:worksheet")) Then
-		$sXPath = StringRegExpReplace($sXPath, '\/\K', 'x:')
-		$sXPath = StringRegExpReplace($sXPath, '@r', 'index()')
-		If $dRowFrom <> 1 Then $sXPath = StringRegExpReplace($sXPath, '(\b' & $dRowFrom & '\b)', $dRowFrom -1)
-		If $dRowTo <> Default Then $sXPath = StringRegExpReplace($sXPath, '(\b' & $dRowTo & '\b)', $dRowTo -1)
-		$sXPathValue = "x:v"
-	EndIf
-
-	Local $oCells = $oXML.selectNodes($sXPath)
+	Local $oCells = $oXML.selectNodes('/' & $sPre & 'worksheet/' & $sPre & 'sheetData/' & $sPre & 'row/' & $sPre & 'c')
 	If Not IsObj($oCells) Then Return SetError(3, 0, False)
-
-	Local $sS, $sR, $sT, $aCoords
+	Local $sR, $aCoords
 
 	; determine dimensions:
 	Local $dColumnMax = 1, $dRowMax = 1
-
-	Local $oDim = $oXML.selectSingleNode('/worksheet/dimension')
+	Local $oDim = $oXML.selectSingleNode('/' & $sPre & 'worksheet/' & $sPre & 'dimension')
 	If IsObj($oDim) Then ; we can use the range attribute
 		Local $aDim = StringRegExp($oDim.GetAttribute("ref"), '([A-Z]+\d+)$', 1)
 		If @error Then Return SetError(4, @error, False)
-
 		$aDim = __xlsx_CellstringToRowColumn($aDim[0])
 		$dColumnMax = $aDim[0]
 		$dRowMax = $aDim[1]
@@ -123,7 +105,6 @@ Func __xlsx_readCells(Const $sFile, ByRef $aStrings, Const $dRowFrom = 1, Const 
 		For $oCell In $oCells
 			$sR = $oCell.GetAttribute("r")
 			$aCoords = __xlsx_CellstringToRowColumn($sR)
-
 			If $aCoords[0] > $dColumnMax Then $dColumnMax = $aCoords[0]
 			If $aCoords[1] > $dRowMax Then $dRowMax = $aCoords[1]
 		Next
@@ -133,23 +114,23 @@ Func __xlsx_readCells(Const $sFile, ByRef $aStrings, Const $dRowFrom = 1, Const 
 	If $dRowTo <> Default Then $dRowMax = $dRowTo > $dRowMax ? $dRowMax : $dRowTo
 	Local $aRet[$dRowMax - $dRowFrom + 1][$dColumnMax]  ;
 
-	; read cell values
+; read cell values
 	Local $i = 0
 	For $oCell In $oCells
 		$i += 1
 
-;~ 		$sS = $oCell.GetAttribute("s")	; style id
 		$sR = $oCell.GetAttribute("r")  ; cell-coordinate
-		$sT = $oCell.GetAttribute("t")  ; type of cell-value
 
-		If $sT = "s" Then    ; value = shared string-id
-			$sValue = $aStrings[Int(__xmlSingleText($oCell, $sXPathValue))]
+		Local $dRow = Number(StringRegExpReplace($sR, '\D+', ''))
+		If $dRow < $dRowFrom Or $dRow > $dRowMax Then ContinueLoop
+
+		If $oCell.GetAttribute("t") = "s" Then    ; value = shared string-id
+			$sValue = $aStrings[Int(__xmlSingleText($oCell, $sPre & 'v'))]
 		Else ; normal value
-			$sValue = __xmlSingleText($oCell, $sXPathValue)
+			$sValue = __xmlSingleText($oCell, $sPre & 'v')
 			If StringRegExp($sValue, '(?i)\A(?|0x\d+|[-+]?(?>\d+)(?>\.\d+)?(?:e[-+]?\d+)?)\Z') Then $sValue = Number($sValue) ; if number then convert to number type
 		EndIf
 		$aCoords = __xlsx_CellstringToRowColumn($sR)
-
 		$aRet[$aCoords[1] - $dRowFrom][$aCoords[0] - 1] = $sValue
 	Next
 
@@ -175,9 +156,10 @@ Func __xlsx_readSharedStrings(Const $sFile)
 
 	If Not $oXML.load($sFile) Then Return SetError(2, 0, False)
 
-	Local $sXPath = IsObj($oXML.selectSingleNode("/x:sst")) ? '/x:sst/x:si/x:t' : '/sst/si/t'
+	Local $sPre = $oXML.documentElement.prefix
+	If $sPre <> "" Then $sPre &= ":"
 
-	Local $oStrings = $oXML.selectNodes($sXPath)
+	Local $oStrings = $oXML.selectNodes('/' & $sPre & 'sst/' & $sPre & 'si/' & $sPre & 't')
 	If Not IsObj($oStrings) Then Return SetError(3, 0, False)
 
 	Local $aRet[$oStrings.length], $i = 0
@@ -232,8 +214,7 @@ Func __xlsx_getXMLObject()
 			.Async = False
 			.resolveExternals = False
 			.validateOnParse = False
-			.SelectionLanguage = "XPath"
-			.ForcedResync = False
+			.setProperty("ForcedResync", False)
 		EndWith
 		$c = 1
 	EndIf
