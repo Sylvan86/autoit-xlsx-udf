@@ -21,10 +21,11 @@
 Local $oErrorHandler = ObjEvent("AutoIt.Error", "_ErrFunc")
 
 ;~ $sXMLPath = 'Test2.xlsx'
-$sXMLPath = 'Abteilungsausflug.xlsx'
+;~ $sXMLPath = 'Abteilungsausflug.xlsx'
 ;~ $sXMLPath = 'Umsätze_2020-07-22.xlsx'
+$sXMLPath = 'test3.xlsx'
 
-$aWorksheet = _xlsx_2Array($sXMLPath, 1, 14)
+$aWorksheet = _xlsx_2Array($sXMLPath, 1)
 
 _ArrayDisplay($aWorksheet)
 

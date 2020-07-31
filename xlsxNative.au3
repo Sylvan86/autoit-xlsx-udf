@@ -2,12 +2,12 @@
 
 ; #INDEX# =======================================================================================================================
 ; Title .........: xlsxNative
-; Version .......: 0.2
+; Version .......: 0.2.1
 ; AutoIt Version : 3.3.14.5
 ; Language ......: English
 ; Description ...: Functions to read data from Excel-xlsx files without the need of having excel installed
 ; Author(s) .....: AspirinJunkie
-; Last changed ..: 2020-07.30
+; Last changed ..: 2020-07.31
 ; ===============================================================================================================================
 
 
@@ -76,6 +76,7 @@ EndFunc   ;==>_xlsx_2Array
 ;                              = 2 - cannot open worksheet file
 ;                              = 3 - cannot extract cell objects out of the xml-structure
 ;                              = 4 - cannot determine worksheet dimensions
+;                              = 5 - wrong string id in shared-string value
 ; Author ........: AspirinJunkie
 ; Last changed ..: 2020-07-27
 ; =================================================================================================
@@ -88,11 +89,11 @@ Func __xlsx_readCells(Const $sFile, ByRef $aStrings, Const $dRowFrom = 1, $dRowT
 	Local $sPre = $oXML.documentElement.prefix
 	If $sPre <> "" Then $sPre &= ":"
 
-	Local $oCells = $oXML.selectNodes('/' & $sPre & 'worksheet/' & $sPre & 'sheetData/' & $sPre & 'row/' & $sPre & 'c')
+	Local $oCells = $oXML.selectNodes('/' & $sPre & 'worksheet/' & $sPre & 'sheetData/' & $sPre & 'row/' & $sPre & 'c[' & $sPre & 'v]')
 	If Not IsObj($oCells) Then Return SetError(3, 0, False)
 	Local $sR, $aCoords
 
-	; determine dimensions:
+; determine dimensions:
 	Local $dColumnMax = 1, $dRowMax = 1
 	Local $oDim = $oXML.selectSingleNode('/' & $sPre & 'worksheet/' & $sPre & 'dimension')
 	If IsObj($oDim) Then ; we can use the range attribute
@@ -112,10 +113,10 @@ Func __xlsx_readCells(Const $sFile, ByRef $aStrings, Const $dRowFrom = 1, $dRowT
 
 	; create output array
 	If $dRowTo <> Default Then $dRowMax = $dRowTo > $dRowMax ? $dRowMax : $dRowTo
-	Local $aRet[$dRowMax - $dRowFrom + 1][$dColumnMax]  ;
+	Local $aRet[$dRowMax - $dRowFrom + 1][$dColumnMax]
 
 ; read cell values
-	Local $i = 0
+	Local $i = 0, $sTmp
 	For $oCell In $oCells
 		$i += 1
 
@@ -125,7 +126,9 @@ Func __xlsx_readCells(Const $sFile, ByRef $aStrings, Const $dRowFrom = 1, $dRowT
 		If $dRow < $dRowFrom Or $dRow > $dRowMax Then ContinueLoop
 
 		If $oCell.GetAttribute("t") = "s" Then    ; value = shared string-id
-			$sValue = $aStrings[Int(__xmlSingleText($oCell, $sPre & 'v'))]
+			$sTmp = Int(__xmlSingleText($oCell, $sPre & 'v'))
+			If $sTmp > UBound($aStrings) Then Return SetError(5, $sTmp, False)
+			$sValue = $aStrings[$sTmp]
 		Else ; normal value
 			$sValue = __xmlSingleText($oCell, $sPre & 'v')
 			If StringRegExp($sValue, '(?i)\A(?|0x\d+|[-+]?(?>\d+)(?>\.\d+)?(?:e[-+]?\d+)?)\Z') Then $sValue = Number($sValue) ; if number then convert to number type
@@ -159,7 +162,7 @@ Func __xlsx_readSharedStrings(Const $sFile)
 	Local $sPre = $oXML.documentElement.prefix
 	If $sPre <> "" Then $sPre &= ":"
 
-	Local $oStrings = $oXML.selectNodes('/' & $sPre & 'sst/' & $sPre & 'si/' & $sPre & 't')
+	Local $oStrings = $oXML.selectNodes('/' & $sPre & 'sst/' & $sPre & 'si')
 	If Not IsObj($oStrings) Then Return SetError(3, 0, False)
 
 	Local $aRet[$oStrings.length], $i = 0
