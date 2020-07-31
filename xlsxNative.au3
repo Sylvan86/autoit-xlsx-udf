@@ -89,12 +89,12 @@ Func __xlsx_readCells(Const $sFile, ByRef $aStrings, Const $dRowFrom = 1, $dRowT
 	Local $sPre = $oXML.documentElement.prefix
 	If $sPre <> "" Then $sPre &= ":"
 
+; select the cell-nodes (but only if they have a value-child)
 	Local $oCells = $oXML.selectNodes('/' & $sPre & 'worksheet/' & $sPre & 'sheetData/' & $sPre & 'row/' & $sPre & 'c[' & $sPre & 'v]')
 	If Not IsObj($oCells) Then Return SetError(3, 0, False)
-	Local $sR, $aCoords
 
 	; determine dimensions:
-	Local $dColumnMax = 1, $dRowMax = 1
+	Local $dColumnMax = 1, $dRowMax = 1, $sR, $aCoords
 	For $oCell In $oCells
 		$sR = $oCell.GetAttribute("r")
 		$aCoords = __xlsx_CellstringToRowColumn($sR)
@@ -113,9 +113,7 @@ Func __xlsx_readCells(Const $sFile, ByRef $aStrings, Const $dRowFrom = 1, $dRowT
 	For $oCell In $oCells
 		$i += 1
 
-		$sR = $oCell.GetAttribute("r")  ; cell-coordinate
-
-		Local $dRow = Number(StringRegExpReplace($sR, '\D+', ''))
+		Local $dRow = $oCell.GetAttribute("zeile")
 		If $dRow < $dRowFrom Or $dRow > $dRowMax Then ContinueLoop
 
 		If $oCell.GetAttribute("t") = "s" Then    ; value = shared string-id
