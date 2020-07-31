@@ -40,7 +40,7 @@ Func _xlsx_2Array(Const $sFile, Const $sSheetNr = 1, $dRowFrom = 1, $dRowTo = De
 	EndIf
 
 	; unpack xlsx-file
-	__unzip($sFile, $pthWorkDir, "shared*.xml sheet.xml sheet" & $sSheetNr &  ".xml")
+	__unzip($sFile, $pthWorkDir, "shared*.xml sheet.xml sheet" & $sSheetNr & ".xml")
 	If @error Then Return SetError(3, @error, False)
 
 	Local $pthSheet = FileExists($pthWorkDir & "xl\worksheets\sheet.xml") ? $pthWorkDir & "xl\worksheets\sheet.xml" : $pthWorkDir & "xl\worksheets\sheet" & $sSheetNr & ".xml"
@@ -85,7 +85,7 @@ Func __xlsx_readCells(Const $sFile, ByRef $aStrings, Const $dRowFrom = 1, $dRowT
 
 	If Not $oXML.load($sFile) Then Return SetError(2, 0, False)
 
-; determine the namespace prefix:
+	; determine the namespace prefix:
 	Local $sPre = $oXML.documentElement.prefix
 	If $sPre <> "" Then $sPre &= ":"
 
@@ -93,29 +93,22 @@ Func __xlsx_readCells(Const $sFile, ByRef $aStrings, Const $dRowFrom = 1, $dRowT
 	If Not IsObj($oCells) Then Return SetError(3, 0, False)
 	Local $sR, $aCoords
 
-; determine dimensions:
+	; determine dimensions:
 	Local $dColumnMax = 1, $dRowMax = 1
-	Local $oDim = $oXML.selectSingleNode('/' & $sPre & 'worksheet/' & $sPre & 'dimension')
-	If IsObj($oDim) Then ; we can use the range attribute
-		Local $aDim = StringRegExp($oDim.GetAttribute("ref"), '([A-Z]+\d+)$', 1)
-		If @error Then Return SetError(4, @error, False)
-		$aDim = __xlsx_CellstringToRowColumn($aDim[0])
-		$dColumnMax = $aDim[0]
-		$dRowMax = $aDim[1]
-	Else ; we have to determine the range ourself
-		For $oCell In $oCells
-			$sR = $oCell.GetAttribute("r")
-			$aCoords = __xlsx_CellstringToRowColumn($sR)
-			If $aCoords[0] > $dColumnMax Then $dColumnMax = $aCoords[0]
-			If $aCoords[1] > $dRowMax Then $dRowMax = $aCoords[1]
-		Next
-	EndIf
+	For $oCell In $oCells
+		$sR = $oCell.GetAttribute("r")
+		$aCoords = __xlsx_CellstringToRowColumn($sR)
+		$oCell.SetAttribute("zeile", $aCoords[1])
+		$oCell.SetAttribute("spalte", $aCoords[0])
+		If $aCoords[0] > $dColumnMax Then $dColumnMax = $aCoords[0]
+		If $aCoords[1] > $dRowMax Then $dRowMax = $aCoords[1]
+	Next
 
 	; create output array
 	If $dRowTo <> Default Then $dRowMax = $dRowTo > $dRowMax ? $dRowMax : $dRowTo
 	Local $aRet[$dRowMax - $dRowFrom + 1][$dColumnMax]
 
-; read cell values
+	; read cell values
 	Local $i = 0, $sTmp
 	For $oCell In $oCells
 		$i += 1
@@ -133,8 +126,7 @@ Func __xlsx_readCells(Const $sFile, ByRef $aStrings, Const $dRowFrom = 1, $dRowT
 			$sValue = __xmlSingleText($oCell, $sPre & 'v')
 			If StringRegExp($sValue, '(?i)\A(?|0x\d+|[-+]?(?>\d+)(?>\.\d+)?(?:e[-+]?\d+)?)\Z') Then $sValue = Number($sValue) ; if number then convert to number type
 		EndIf
-		$aCoords = __xlsx_CellstringToRowColumn($sR)
-		$aRet[$aCoords[1] - $dRowFrom][$aCoords[0] - 1] = $sValue
+		$aRet[$oCell.GetAttribute("zeile") - $dRowFrom][$oCell.GetAttribute("spalte") - 1] = $sValue
 	Next
 
 	Return $aRet
@@ -222,7 +214,7 @@ Func __xlsx_getXMLObject()
 		$c = 1
 	EndIf
 	Return $oX
-EndFunc
+EndFunc   ;==>__xlsx_getXMLObject
 
 #EndRegion xlsx specific helper functions
 
