@@ -7,7 +7,7 @@
 ; Language ......: English
 ; Description ...: Functions to read data from Excel-xlsx files without the need of having excel installed
 ; Author(s) .....: AspirinJunkie
-; Last changed ..: 2020-07.31
+; Last changed ..: 2020-08-07
 ; ===============================================================================================================================
 
 
@@ -89,7 +89,7 @@ Func __xlsx_readCells(Const $sFile, ByRef $aStrings, Const $dRowFrom = 1, $dRowT
 	Local $sPre = $oXML.documentElement.prefix
 	If $sPre <> "" Then $sPre &= ":"
 
-; select the cell-nodes (but only if they have a value-child)
+	; select the cell-nodes (but only if they have a value-child)
 	Local $oCells = $oXML.selectNodes('/' & $sPre & 'worksheet/' & $sPre & 'sheetData/' & $sPre & 'row/' & $sPre & 'c[' & $sPre & 'v]')
 	If Not IsObj($oCells) Then Return SetError(3, 0, False)
 
@@ -180,21 +180,71 @@ Func __xlsx_CellstringToRowColumn($sID)
 	Return $aRet
 EndFunc   ;==>__xlsx_CellstringToRowColumn
 
-; converts excel date value to array [year, month, day, hour, minute, second]
-Func __xlsxExcel2Date($dExcelDate)
-	Local $aRet[6]
-	Local $fTimeRaw = $dExcelDate - Int($dExcelDate)
 
-	_DayValueToDate(2415018.5 + Int($dExcelDate), $aRet[0], $aRet[1], $aRet[2])
+; #FUNCTION# ======================================================================================
+; Name ..........: __xlsxExcel2Date
+; Description ...: convert a excel date-value into an editable form (array of components or formatted string)
+;                  with standard parameters the local date and time format is used
+; Syntax ........: __xlsxExcel2Date($dExcelDate[, Const $sType = Default[, Const $iFlags = 0x01[, Const $sFormat = ""[, Const $iFlagsTime = 0[, Const $sFormatTime = ""]]]]])
+; Parameters ....: $dExcelDate     - excel date value as number or string
+;                  $sType          - Default: an array[6]: [year, month, day, hour, minute, second]
+;                                    "date": string with formatted date
+;                                    "time": string with formatted time
+;                                    "datetime": string with formatted date and time
+;                  $iFlags         - parameter $iflags of _WinAPI_GetDateFormat()
+;                  $sFormat        - parameter $sFormat of _WinAPI_GetDateFormat()
+;                  $iFlagsTime     - parameter $iflags of _WinAPI_GetTimeFormat()
+;                  $sFormatTime    - parameter $sFormat of _WinAPI_GetTimeFormat()
+; Return values .: Success - Return array or string (depending on the selected $sType)
+;                  Failure - Return False and set @error to:
+;        				@error = 1 - invalid value for $sType
+; Author ........: AspirinJunkie
+; Last changed ..: 2020-08-07
+; =================================================================================================
+Func __xlsxExcel2Date($dExcelDate, Const $sType = Default, Const $iFlags = 0x01, Const $sFormat = "", Const $iFlagsTime = 0, Const $sFormatTime = "")
+	Switch $sType
+		Case Default
+			Local $aRet[6], $fTimeRaw = $dExcelDate - Int($dExcelDate)
 
-	; process the time
-	$aRet[3] = Floor($fTimeRaw * 24)
-	$fTimeRaw -= $aRet[3] / 24    ; = Mod($fTimeRaw, 1/24)
-	$aRet[4] = Floor($fTimeRaw * 1440)
-	$fTimeRaw -= $aRet[4] / 1440
-	$aRet[5] = Floor($fTimeRaw * 86400)
+			_DayValueToDate(2415018.5 + Int($dExcelDate), $aRet[0], $aRet[1], $aRet[2])
 
-	Return $aRet
+			; process the time
+			$aRet[3] = Floor($fTimeRaw * 24)
+			$fTimeRaw -= $aRet[3] / 24 ; = Mod($fTimeRaw, 1/24)
+			$aRet[4] = Floor($fTimeRaw * 1440)
+			$fTimeRaw -= $aRet[4] / 1440
+			$aRet[5] = Floor($fTimeRaw * 86400)
+
+			Return $aRet
+		Case "date"
+			Local $y, $m, $d
+			_DayValueToDate(2415018.5 + Int($dExcelDate), $y, $m, $d)
+			Local $tDateTime = _Date_Time_EncodeSystemTime($m, $d, $y)
+			Return _WinAPI_GetDateFormat(0x0400, $tDateTime, $iFlags, $sFormat)
+		Case "time"
+			Local $h, $min, $s, $fTimeRaw = $dExcelDate - Int($dExcelDate)
+			; process the time
+			$h = Floor($fTimeRaw * 24)
+			$fTimeRaw -= $h / 24 ; = Mod($fTimeRaw, 1/24)
+			$min = Floor($fTimeRaw * 1440)
+			$fTimeRaw -= $min / 1440
+			$s = Floor($fTimeRaw * 86400)
+			Return StringFormat("%02d:%02d:%02d", $h, $min, $s)
+		Case "datetime"
+			Local $y, $m, $d, $h, $min, $s, $fTimeRaw = $dExcelDate - Int($dExcelDate)
+			; process the time
+			$h = Floor($fTimeRaw * 24)
+			$fTimeRaw -= $h / 24 ; = Mod($fTimeRaw, 1/24)
+			$min = Floor($fTimeRaw * 1440)
+			$fTimeRaw -= $min / 1440
+			$s = Floor($fTimeRaw * 86400)
+
+			_DayValueToDate(2415018.5 + Int($dExcelDate), $y, $m, $d)
+			Local $tDateTime = _Date_Time_EncodeSystemTime($m, $d, $y, $h, $min, $s)
+			Return _WinAPI_GetDateFormat(0x0400, $tDateTime, $iFlags, $sFormat) & " " & _WinAPI_GetTimeFormat(0, $tDateTime, $iFlagsTime, $sFormatTime)
+		Case Else
+			Return SetError(1,0, False)
+	EndSwitch
 EndFunc   ;==>__xlsxExcel2Date
 
 ; function to share one single xmldom-object over the functions but without beeing a global variable
@@ -241,7 +291,7 @@ Func __unzip($sInput, $sOutput, Const $sPattern = "")
 	Return 1
 EndFunc   ;==>__unzip
 
-; returns single from a xml-dom-object and handles errors
+; returns value of a single xml-dom-node and handles errors
 Func __xmlSingleText(ByRef $oXML, Const $sXPath)
 	Local $oTmp = $oXML.selectSingleNode($sXPath)
 	Return IsObj($oTmp) ? $oTmp.text : SetError(1, 0, "")
