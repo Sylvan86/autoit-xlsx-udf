@@ -1,4 +1,5 @@
 #include <Date.au3>
+#include <Array.au3>
 
 ; #INDEX# =======================================================================================================================
 ; Title .........: xlsxNative
@@ -9,7 +10,6 @@
 ; Author(s) .....: AspirinJunkie
 ; Last changed ..: 2021-03-29
 ; ===============================================================================================================================
-
 
 
 ; #FUNCTION# ======================================================================================
@@ -40,15 +40,25 @@ Func _xlsx_2Array(Const $sFile, Const $sSheetNr = 1, $dRowFrom = 1, $dRowTo = De
 	EndIf
 
 	; unpack xlsx-file
-	__unzip($sFile, $pthWorkDir, "shared*.xml sheet.xml sheet" & $sSheetNr & ".xml")
+	__unzip($sFile, $pthWorkDir, "shared*.xml sheet.xml sheet" & $sSheetNr & ".xml *.rels")
 	If @error Then Return SetError(3, @error, False)
 
-	; TODO: read from xl\_rels\*.rels
-	Local $pthSheet = FileExists($pthWorkDir & "xl\worksheets\sheet.xml") ? $pthWorkDir & "xl\worksheets\sheet.xml" : $pthWorkDir & "xl\worksheets\sheet" & $sSheetNr & ".xml"
+	; determine file paths:
+	Local $aFiles = __xlsx_getSubFiles($pthWorkDir)
+	If @error Then Return SetError(1, @error, False)
 
-	; read strings into an 1D-array
-	Local $aStrings = __xlsx_readSharedStrings($pthStrings)
-	If @error Then Local $aStrings[0] ; Return SetError(1, @error, False)
+	; determine sheet file
+	If $sSheetNr + 1 > UBound($aFiles) Then Return SetError(4, UBound($aFiles) - 1, False)
+	Local $pthSheet = $pthWorkDir & $aFiles[$sSheetNr]
+	If Not FileExists($pthSheet) Then Return SetError(5, 0, False)
+
+	; read shared strings into an 1D-array
+	If $aFiles[0] == "" Then
+		Local $aStrings[0]
+	Else
+		Local $aStrings = __xlsx_readSharedStrings($pthWorkDir & $aFiles[0])
+		If @error Then Local $aStrings[0]
+	EndIf
 
 	; read all cells into an 2D-array
 	Local $aCells = __xlsx_readCells($pthSheet, $aStrings, $dRowFrom, $dRowTo)
@@ -86,37 +96,37 @@ Func _xlsx_WriteFromArray(Const $sFile, ByRef $aArray)
 			$aA[$i][0] = $aArray[$i]
 		Next
 	Else
-		If Not IsArray($aArray) Then Return SetError(1,0, False)
+		If Not IsArray($aArray) Then Return SetError(1, 0, False)
 		Local $aA = $aArray
 	EndIf
 
 	; [Content_Types].xml
 	DirCreate($pthWorkDir)
-	If @error Then Return SetError(2,1, False)
+	If @error Then Return SetError(2, 1, False)
 	FileWrite($pthWorkDir & '[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="bin" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.printerSettings" /><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml" /><Default Extension="xml" ContentType="application/xml" /><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml" /><Override PartName="/xl/worksheets/sheet.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml" /></Types>')
-	If @error Then Return SetError(3,1, False)
+	If @error Then Return SetError(3, 1, False)
 
 	; .rels
 	DirCreate($pthWorkDir & '_rels')
-	If @error Then Return SetError(2,2, False)
+	If @error Then Return SetError(2, 2, False)
 	FileWrite($pthWorkDir & '_rels\.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>')
-	If @error Then Return SetError(3,2, False)
+	If @error Then Return SetError(3, 2, False)
 
 	; workbook.xml
 	DirCreate($pthWorkDir & 'xl')
-	If @error Then Return SetError(2,3, False)
+	If @error Then Return SetError(2, 3, False)
 	FileWrite($pthWorkDir & 'xl\workbook.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="1" sheetId="1" r:id="rId1" /></sheets></workbook>')
-	If @error Then Return SetError(3,3, False)
+	If @error Then Return SetError(3, 3, False)
 
 	; workbook.xml.rels
 	DirCreate($pthWorkDir & 'xl\_rels')
-	If @error Then Return SetError(2,4, False)
+	If @error Then Return SetError(2, 4, False)
 	FileWrite($pthWorkDir & 'xl\_rels\workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet.xml"/></Relationships>')
-	If @error Then Return SetError(3,4, False)
+	If @error Then Return SetError(3, 4, False)
 
 	; sheet.xml
 	DirCreate($pthWorkDir & 'xl\worksheets')
-	If @error Then Return SetError(2,5, False)
+	If @error Then Return SetError(2, 5, False)
 	Local $sSheet = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetData>'
 	For $r = 0 To UBound($aA) - 1
 		$sSheet &= '<row>'
@@ -139,7 +149,7 @@ Func _xlsx_WriteFromArray(Const $sFile, ByRef $aArray)
 	Next
 	$sSheet &= '</sheetData></worksheet>'
 	FileWrite($pthWorkDir & 'xl\worksheets\sheet.xml', $sSheet)
-	If @error Then Return SetError(3,5, False)
+	If @error Then Return SetError(3, 5, False)
 
 	; zip to xlsx
 	FileDelete($sFile)
@@ -184,56 +194,146 @@ Func __xlsx_readCells(Const $sFile, ByRef $aStrings, Const $dRowFrom = 1, $dRowT
 	Local $sPre = $oXML.documentElement.prefix
 	If $sPre <> "" Then $sPre &= ":"
 
-	; select the cell-nodes (but only if they have a value-child)
-	Local $oCells = $oXML.selectNodes('/' & $sPre & 'worksheet/' & $sPre & 'sheetData/' & $sPre & 'row/' & $sPre & 'c[' & $sPre & 'v]')
-	If Not IsObj($oCells) Then Return SetError(3, 0, False)
+	If IsObj($oXML.selectSingleNode('//' & $sPre & 'row/' & $sPre & 'c[@r]')) Then
+		; variant with cell-coordinate attribute @r
 
-	; determine dimensions:
-	Local $dColumnMax = 1, $dRowMax = 1, $sR, $aCoords
-	For $oCell In $oCells
-		$sR = $oCell.GetAttribute("r")
-		$aCoords = __xlsx_CellstringToRowColumn($sR)
-		$oCell.SetAttribute("zeile", $aCoords[1])
-		$oCell.SetAttribute("spalte", $aCoords[0] - 1)
-		If $aCoords[0] > $dColumnMax Then $dColumnMax = $aCoords[0]
-		If $aCoords[1] > $dRowMax Then $dRowMax = $aCoords[1]
-	Next
+		; select the cell-nodes (but only if they have a value-child)
+		Local $oCells = $oXML.selectNodes('/' & $sPre & 'worksheet/' & $sPre & 'sheetData/' & $sPre & 'row/' & $sPre & 'c[' & $sPre & 'v]')
+		If Not IsObj($oCells) Then Return SetError(3, 0, False)
 
-	; create output array
-	If $dRowTo <> Default Then $dRowMax = $dRowTo > $dRowMax ? $dRowMax : $dRowTo
-	Local $aRet[$dRowMax - $dRowFrom + 1][$dColumnMax]
+		; determine dimensions:
+		Local $dColumnMax = 1, $dRowMax = 1, $sR, $aCoords
+		For $oCell In $oCells
+			$sR = $oCell.GetAttribute("r")
+			$aCoords = __xlsx_CellstringToRowColumn($sR)
+			$oCell.SetAttribute("zeile", $aCoords[1])
+			$oCell.SetAttribute("spalte", $aCoords[0] - 1)
+			If $aCoords[0] > $dColumnMax Then $dColumnMax = $aCoords[0]
+			If $aCoords[1] > $dRowMax Then $dRowMax = $aCoords[1]
+		Next
 
-	; read cell values
-	Local $i = 0, $sTmp
-	For $oCell In $oCells
-		$i += 1
+		; create output array
+		If $dRowTo <> Default Then $dRowMax = $dRowTo > $dRowMax ? $dRowMax : $dRowTo
+		Local $aRet[$dRowMax - $dRowFrom + 1][$dColumnMax]
 
-		Local $dRow = $oCell.GetAttribute("zeile")
-		If $dRow < $dRowFrom Or $dRow > $dRowMax Then ContinueLoop
+		; read cell values
+		Local $i = 0, $sTmp
+		For $oCell In $oCells
+			$i += 1
 
-		Switch $oCell.GetAttribute("t")
-			Case "s" ; value = shared string-id
-				$sTmp = Int(__xmlSingleText($oCell, $sPre & 'v'))
-				If $sTmp > UBound($aStrings) Then Return SetError(5, $sTmp, False)
-				$sValue = $aStrings[$sTmp]
-			Case "inlineStr" ; inline string
-				; Wert steht hier nicht in <v> sondern in einem <is></is> wo hierin wiederrum der selbe Aufbau herrscht wie in einem <si>-Element der sharedStrings.xml Also steht der Wert entweder in <t></t> bei normalem Text oder in <r></r> bei rich text.
-			Case "str" ; formula
-				; hier steht die Formel selbst in einem [optionalem] <f></f> während der letzte berechnete Wert normal in <v></v> steht.
-				$sValue = __xmlSingleText($oCell, $sPre & 'v')
-				; Case "n" ; number (integers, floats, dates, times)
-				; Case "e" ; error
-				; Case "b" ; boolean
-			Case Else  ; normal value
-				$sValue = __xmlSingleText($oCell, $sPre & 'v')
-				If StringRegExp($sValue, '(?i)\A(?|0x\d+|[-+]?(?>\d+)(?>\.\d+)?(?:e[-+]?\d+)?)\Z') Then $sValue = Number($sValue) ; if number then convert to number type
-		EndSwitch
-		$aRet[$oCell.GetAttribute("zeile") - $dRowFrom][$oCell.GetAttribute("spalte")] = $sValue
-	Next
+			Local $dRow = $oCell.GetAttribute("zeile")
+			If $dRow < $dRowFrom Or $dRow > $dRowMax Then ContinueLoop
+
+			Switch $oCell.GetAttribute("t")
+				Case "s" ; value = shared string-id
+					$sTmp = Int(__xmlSingleText($oCell, $sPre & 'v'))
+					If $sTmp > UBound($aStrings) Then Return SetError(5, $sTmp, False)
+					$sValue = $aStrings[$sTmp]
+				Case "inlineStr" ; inline string
+					; Wert steht hier nicht in <v> sondern in einem <is></is> wo hierin wiederrum der selbe Aufbau herrscht wie in einem <si>-Element der sharedStrings.xml Also steht der Wert entweder in <t></t> bei normalem Text oder in <r></r> bei rich text.
+				Case "str" ; formula
+					; hier steht die Formel selbst in einem [optionalem] <f></f> während der letzte berechnete Wert normal in <v></v> steht.
+					$sValue = __xmlSingleText($oCell, $sPre & 'v')
+					; Case "n" ; number (integers, floats, dates, times)
+					; Case "e" ; error
+					; Case "b" ; boolean
+				Case Else ; normal value
+					$sValue = __xmlSingleText($oCell, $sPre & 'v')
+					If StringRegExp($sValue, '(?i)\A(?|0x\d+|[-+]?(?>\d+)(?>\.\d+)?(?:e[-+]?\d+)?)\Z') Then $sValue = Number($sValue) ; if number then convert to number type
+			EndSwitch
+			$aRet[$oCell.GetAttribute("zeile") - $dRowFrom][$oCell.GetAttribute("spalte")] = $sValue
+		Next
+
+	Else
+		; variant without cell coordinate attribute
+		Local $oVal, $oRows, $oCols
+		$oRows = $oXML.selectNodes('/' & $sPre & 'worksheet/' & $sPre & 'sheetData/' & $sPre & 'row')
+		$oCols = $oXML.selectNodes('/' & $sPre & 'worksheet/' & $sPre & 'sheetData/' & $sPre & 'row[0]/c')
+		Local $aRet[$oRows.length][$oCols.length], $iR = 0, $iC = 0, $oV, $sValue
+
+		For $oRow In $oXML.selectNodes('/' & $sPre & 'worksheet/' & $sPre & 'sheetData/' & $sPre & 'row')
+			$iC = 0
+
+			For $oCell In $oRow.selectNodes('./' & $sPre & 'c')
+				$oV = $oCell.selectSingleNode('./' & $sPre & 'v | ./' & $sPre & 'is')
+				If IsObj($oV) Then
+					$sValue = $oV.text()
+
+					Switch $oCell.GetAttribute("t")
+						Case "s" ; value = shared string-id
+							$sTmp = Int($sValue)
+							If $sTmp > UBound($aStrings) Then Return SetError(5, $sTmp, False)
+							$sValue = $aStrings[$sTmp]
+						Case "inlineStr" ; inline string
+							$sValue = __xmlSingleText($oCell, './' & $sPre & 'is/' & $sPre & 't | ./' & $sPre & 'is/' & $sPre & 'r')
+						Case "str" ; formula
+							; hier steht die Formel selbst in einem [optionalem] <f></f> während der letzte berechnete Wert normal in <v></v> steht.
+							$sValue = __xmlSingleText($oCell, $sPre & 'v')
+							; Case "e" ; error
+						Case "n"  ; number (integers, floats, dates, times)
+							$sValue = Number($sValue)
+						Case "b" ; boolean
+							$sValue = $sValue = True
+						Case Else ; normal value
+							$sValue = __xmlSingleText($oCell, $sPre & 'v')
+							If StringRegExp($sValue, '(?i)\A(?|0x\d+|[-+]?(?>\d+)(?>\.\d+)?(?:e[-+]?\d+)?)\Z') Then $sValue = Number($sValue) ; if number then convert to number type
+					EndSwitch
+
+					If $iR > UBound($aRet, 1) - 1 Or $iC > UBound($aRet, 2) - 1 Then ReDim $aRet[$iR + 1][$iC + 1]
+					$aRet[$iR][$iC] = $sValue
+				EndIf
+				$iC += 1
+			Next
+			$iR += 1
+		Next
+	EndIf
 
 	Return $aRet
 EndFunc   ;==>__xlsx_readCells
 
+
+; #FUNCTION# ======================================================================================
+; Name ..........: __xlsx_getSubFiles
+; Description ...: determine the file paths of the sheet files and the sharedStrings file
+; Syntax ........: __xlsx_getSubFiles([$pthWorkDir = @TempDir & "\xlsxWork\"])
+; Parameters ....: $pthWorkDir - root folder of extracted xlsx file
+; Return values .: Success - Return 2D-Array with the worksheet content
+;                  Failure - Return False and set @error to:
+;        				@error = 1 - no global .rels file found
+;                              = 2 - no workbook file determined
+;                              = 3 - no .rel-file connected to the workbook found
+;                              = 4 - no worksheets found
+; Author ........: AspirinJunkie
+; Last changed ..: 2021-04-01
+; =================================================================================================
+Func __xlsx_getSubFiles($pthWorkDir = @TempDir & "\xlsxWork\")
+	Local $oXML = __xlsx_getXMLObject()
+
+	; determine workbook file and their path
+	If Not $oXML.load($pthWorkDir & "\_rels\.rels") Then Return SetError(1, 0, False)
+	Local $sSubPath, $sWorkbook
+	For $oRS In $oXML.selectNodes('//Relationship')
+		If StringRegExp($oRS.getAttribute("Type"), 'officeDocument$') Then
+			$sWorkbook = StringRegExpReplace($oRS.getAttribute("Target"), '^.+\/', '')
+			$sSubPath = StringRegExpReplace($oRS.getAttribute("Target"), '\/[^\/]+$', '')
+			ExitLoop
+		EndIf
+	Next
+	If $sWorkbook = "" Then Return SetError(2, 0, False)
+
+	; determine sheet file and sharedstrings if available
+	Local $sSheetPath, $aRet[1]
+	If Not $oXML.load($pthWorkDir & "\" & $sSubPath & "\_rels\" & $sWorkbook & ".rels") Then Return SetError(3, 0, False)
+	For $oRS In $oXML.selectNodes('//Relationship')
+		Local $sType = $oRS.getAttribute("Type"), $sTarget = $oRS.getAttribute('Target')
+		If StringRegExp($sType, 'worksheet$') Then _ArrayAdd($aRet, StringRegExp($sTarget, '^\Q' & $sSubPath) ? $sTarget : $sSubPath & "/" & $sTarget)
+		If StringRegExp($sType, 'sharedStrings$') Then $aRet[0] = StringRegExp($sTarget, '^\Q' & $sSubPath) ? $sTarget : $sSubPath & "/" & $sTarget
+	Next
+	If UBound($aRet) = 1 Then Return SetError(4, 0, False)
+	_ArraySort($aRet, 0, 1)
+
+	Return SetExtended($aRet[0] == "", $aRet)
+EndFunc   ;==>__xlsx_getSubFiles
 
 ; #FUNCTION# ======================================================================================
 ; Name ..........: __xlsx_readSharedStrings
@@ -375,7 +475,7 @@ EndFunc   ;==>__xlsx_getXMLObject
 #Region general helper functions
 
 Func __unzip($sInput, $sOutput, Const $sPattern = "")
-	; TODO: maybe powershell "Expand-Archive" or jar is faster than shell.application
+	; TODO: maybe powershell "	" or jar is faster than shell.application
 
 	If Not FileExists($sInput) Then Return SetError(1, @error, False)
 	$sOutput = StringRegExpReplace($sOutput, '(\\*)$', '')
@@ -400,21 +500,21 @@ EndFunc   ;==>__unzip
 
 
 Func __zip($sInput, $sOutput)
-		Local $iExitCode
+	Local $iExitCode
 
-		;  $iExitCode = RunWait(StringFormat('zip.exe -qr -9 "%s" .'', $sInput, $sOutput & ".zip"), "", @SW_HIDE)
-		;  If Not @error And $iExitCode = 0 Then
+	;  $iExitCode = RunWait(StringFormat('zip.exe -qr -9 "%s" .'', $sInput, $sOutput & ".zip"), "", @SW_HIDE)
+	;  If Not @error And $iExitCode = 0 Then
 
-		; "jar -cMf targetArchive.zip sourceDirectory"
+	; "jar -cMf targetArchive.zip sourceDirectory"
 
-		;  $iExitCode = RunWait(StringFormat('7za.exe a -mm=Deflate -mfb=258 -mpass=15 -r "%s" "%s"', $sOutput, $sInput), "", @SW_HIDE)
-		;  If @error Or $iExitCode <> 0 Then
+	$iExitCode = RunWait(StringFormat('7za.exe a -mm=Deflate -mfb=258 -mpass=15 -r "%s" "%s"', $sOutput, $sInput), "", @SW_HIDE)
+	If @error Or $iExitCode <> 0 Then
 
-			$iExitCode = RunWait(StringFormat('powershell.exe -Command "Compress-Archive ''%s'' ''%s''"', $sInput, $sOutput & ".zip"), "", @SW_HIDE)
-			If Not @error And $iExitCode = 0 Then
-				FileMove($sOutput & ".zip", $sOutput)
-			EndIf
-		;  EndIf
+		$iExitCode = RunWait(StringFormat('powershell.exe -Command "Compress-Archive ''%s'' ''%s''"', $sInput, $sOutput & ".zip"), "", @SW_HIDE)
+		If Not @error And $iExitCode = 0 Then
+			FileMove($sOutput & ".zip", $sOutput)
+		EndIf
+	EndIf
 	Return 1
 EndFunc   ;==>__zip
 
