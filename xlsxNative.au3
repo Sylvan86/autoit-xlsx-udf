@@ -8,7 +8,7 @@
 ; Language ......: English
 ; Description ...: Functions to read/write data from/to Excel-xlsx files without the need of having excel installed
 ; Author(s) .....: AspirinJunkie
-; Last changed ..: 2021-03-29
+; Last changed ..: 2021-05-26
 ; ===============================================================================================================================
 
 
@@ -26,7 +26,7 @@
 ;                              = 2 - error reading cell-values (@extended = @error of __xlsx_readCells)
 ;                              = 3 - error unpacking the xlsx-file (@extended = @error of __unzip)
 ; Author ........: AspirinJunkie
-; Last changed ..: 2020-07-27
+; Last changed ..: 2021-05-26
 ; =================================================================================================
 Func _xlsx_2Array(Const $sFile, Const $sSheetNr = 1, $dRowFrom = 1, $dRowTo = Default)
 	Local $pthWorkDir = @TempDir & "\xlsxWork\"
@@ -304,7 +304,7 @@ EndFunc   ;==>__xlsx_readCells
 ;                              = 3 - no .rel-file connected to the workbook found
 ;                              = 4 - no worksheets found
 ; Author ........: AspirinJunkie
-; Last changed ..: 2021-04-01
+; Last changed ..: 2021-05-26
 ; =================================================================================================
 Func __xlsx_getSubFiles($pthWorkDir = @TempDir & "\xlsxWork\")
 	Local $oXML = __xlsx_getXMLObject()
@@ -330,7 +330,9 @@ Func __xlsx_getSubFiles($pthWorkDir = @TempDir & "\xlsxWork\")
 		If StringRegExp($sType, 'sharedStrings$') Then $aRet[0] = StringRegExp($sTarget, '^\Q' & $sSubPath) ? $sTarget : $sSubPath & "/" & $sTarget
 	Next
 	If UBound($aRet) = 1 Then Return SetError(4, 0, False)
-	_ArraySort($aRet, 0, 1)
+
+	; sort because sheet files are randomized:
+	_xlsx_ArraySortNatural($aRet, 1)
 
 	Return SetExtended($aRet[0] == "", $aRet)
 EndFunc   ;==>__xlsx_getSubFiles
@@ -518,9 +520,38 @@ Func __zip($sInput, $sOutput)
 	Return 1
 EndFunc   ;==>__zip
 
+; #FUNCTION# ======================================================================================
+; Name ..........: _xlsx_ArraySortNatural
+; Description ...: sort an array like the explorer would
+; Syntax ........:_xlsx_ArraySortNatural(ByRef $A, [Const $i_Min = 0, [Const $i_Max = UBound($a_Array) - 1,{Const $b_First = True}]])
+; Parameters ....: $a_Array       - the array which should be sorted (by reference means direct manipulating of the array - no copy)
+;                  $i_Min         - the start index for the sorting range in the array
+;                  $i_Max         - the end index for the sorting range in the array
+; Return values .: Success: True  - array is sorted now
+; Author ........: AspirinJunkie
+; =================================================================================================
+Func _xlsx_ArraySortNatural(ByRef $A, Const $i_Min = 0, Const $i_Max = UBound($A) - 1)
+	Local $t1, $t2
+	For $i = $i_Min + 1 To $i_Max
+		$t1 = $A[$i]
+		For $j = $i - 1 To $i_Min Step -1
+			$t2 = $A[$j]
+			If __xlsx_compareNatural($t1, $t2) <> -1 Then ExitLoop
+			$A[$j + 1] = $t2
+		Next
+		$A[$j + 1] = $t1
+	Next
+	Return True
+EndFunc   ;==>_xlsx_ArraySortNatural
 
-
-
+; Vergleichsfunktion als Wrapper für StrCmpLogicalW welche wie der Explorer intuitiver sortiert falls Zahlenwerte in den Strings vorkommen
+Func __xlsx_compareNatural(Const ByRef $A, Const ByRef $B)
+	Local Static $h_DLL_Shlwapi = DllOpen("Shlwapi.dll")
+	If Not IsString($A) Or Not IsString($B) Then Return $A > $B ? 1 : $A < $B ? -1 : 0
+    Local $a_Ret = DllCall($h_DLL_Shlwapi, "int", "StrCmpLogicalW", "wstr", $A, "wstr", $B)
+    If @error Then Return SetError(1, @error, 0)
+    Return $a_Ret[0]
+EndFunc   ;==>MyCompare
 
 
 
