@@ -17,7 +17,7 @@
 ; Description ...: reads single worksheets of an Excel xlsx-file into an array
 ; Syntax ........: _xlsx_2Array(Const $sFile [, Const $sSheetNr = 1 [, $dRowFrom = 1 [, $dRowTo = Default]]])
 ; Parameters ....: $sFile      - path-string of the xlsx-file
-;                  $sSheetNr   - number (1-based) of the target worksheet
+;                  $sSheetNr   - id (1-based) of the target worksheet
 ;                  $dRowFrom   - row number (1-based) where to start the extraction
 ;                  $dRowTo   - row number (1-based) where to stop the extraction
 ; Return values .: Success - Return 2D-Array with the worksheet content
@@ -141,7 +141,7 @@ Func _xlsx_WriteFromArray(Const $sFile, ByRef $aArray)
 					Case "Bool"
 						$sSheet &= '<c t="b"><v>' & Int($aA[$r][$c]) & '</v></c>'
 					Case Else ; especially a string
-						$sSheet &= '<c t="inlineStr"><is><t>' & String($aA[$r][$c]) & '</t></is></c>'
+						$sSheet &= '<c t="inlineStr"><is><t>' & __xlsx_escape4xml($aA[$r][$c]) & '</t></is></c>'
 				EndSwitch
 			EndIf
 		Next
@@ -162,6 +162,61 @@ Func _xlsx_WriteFromArray(Const $sFile, ByRef $aArray)
 	Return True
 EndFunc   ;==>_xlsx_WriteFromArray
 
+; #FUNCTION# ======================================================================================
+; Name ..........: _xlsx_getWorkSheets
+; Description ...: return the sheets ids and names of a xlsx file
+; Syntax ........: _xlsx_getWorkSheets(Const $sFile)
+; Parameters ....: $sFile      - path-string of the xlsx-file
+; Return values .: Success - Return 2D-Array with the worksheet list where [...][0] = id and [...][1] = sheet name
+;                  Failure - Return False and set @error to:
+;        				@error = 1 - error unzipping the xlsx file
+;                              = 2 - error loading the .rels file
+;                              = 3 - error determine the workbook.xml file path
+;                              = 4 - error loading the workbook.xml
+;                              = 5 - error determine the sheets node inside the workbook.xml
+; Author ........: AspirinJunkie
+; Last changed ..: 2022-01-22
+; =================================================================================================
+Func _xlsx_getWorkSheets(Const $sFile)
+	Local $pthWorkDir = @TempDir & "\xlsxWork\"
+
+	; unpack xlsx-file
+	__unzip($sFile, $pthWorkDir, "workbook.xml *.rels")
+	If @error Then Return SetError(1, @error, False)
+
+	; determine workbook file and their path
+	Local $oXML = __xlsx_getXMLObject()
+	If Not $oXML.load($pthWorkDir & "\_rels\.rels") Then Return SetError(2, 0, False)
+	Local $sSubPath, $sWorkbook
+	For $oRS In $oXML.selectNodes('//Relationship')
+		If StringRegExp($oRS.getAttribute("Type"), 'officeDocument$') Then
+			$sWorkbook = StringRegExpReplace($oRS.getAttribute("Target"), '^.+\/', '')
+			$sSubPath = StringRegExpReplace($oRS.getAttribute("Target"), '\/[^\/]+$', '')
+			ExitLoop
+		EndIf
+	Next
+	If $sWorkbook = "" Then Return SetError(3, 0, False)
+
+	; load and parse the workbook.xml:
+	If Not $oXML.load($pthWorkDir & "xl\" & $sWorkbook) Then Return SetError(4, 0, False)
+
+	; determine the sheets list
+	Local $oSheets = $oXML.selectNodes('//sheets/sheet'), $oSheet
+	If Not IsObj($oSheets) THen Return SetError(5,0, False)
+
+	; prepare the data as an array
+	Local $aRet[$oSheets.length][2], $iC = 0
+	For $oSheet in $oSheets
+		$aRet[$iC][0] = $oSheet.getAttribute("sheetId")
+		$aRet[$iC][1] = $oSheet.getAttribute("name")
+		$iC += 1
+	Next
+
+	; remove temporary data
+	DirRemove($pthWorkDir, 1)
+
+	Return $aRet
+EndFunc   ;==>_xlsx_2Array
 
 #Region xlsx specific helper functions
 
@@ -234,9 +289,10 @@ Func __xlsx_readCells(Const $sFile, ByRef $aStrings, Const $dRowFrom = 1, $dRowT
 				Case "str" ; formula
 					; hier steht die Formel selbst in einem [optionalem] <f></f> während der letzte berechnete Wert normal in <v></v> steht.
 					$sValue = __xmlSingleText($oCell, $sPre & 'v')
-					; Case "n" ; number (integers, floats, dates, times)
-					; Case "e" ; error
-					; Case "b" ; boolean
+				Case "n" ; number (integers, floats, dates, times)
+					$sValue = Number($sValue)
+				; Case "e" ; error
+				; Case "b" ; boolean
 				Case Else ; normal value
 					$sValue = __xmlSingleText($oCell, $sPre & 'v')
 					If StringRegExp($sValue, '(?i)\A(?|0x\d+|[-+]?(?>\d+)(?>\.\d+)?(?:e[-+]?\d+)?)\Z') Then $sValue = Number($sValue) ; if number then convert to number type
@@ -360,7 +416,6 @@ Func __xlsx_readSharedStrings(Const $sFile)
 
 	Local $oStrings = $oXML.selectNodes('/' & $sPre & 'sst/' & $sPre & 'si')
 	If Not IsObj($oStrings) Then Return SetError(3, 0, False)
-
 	Local $aRet[$oStrings.length], $i = 0
 
 	For $oText In $oStrings
@@ -478,6 +533,8 @@ EndFunc   ;==>__xlsx_getXMLObject
 
 Func __unzip($sInput, $sOutput, Const $sPattern = "")
 	; TODO: maybe powershell "	" or jar is faster than shell.application
+	; RunWait(StringFormat('powershell.exe -Command "Expand-Archive -LiteralPath ''%s'' -DestinationPath ''%s'' -Force"', $sFile, $sOutPath), "", @SW_HIDE)
+	; but!: expand-archive can only handle files with zip-ending. so still have to rename or copy to a zip-file
 
 	If Not FileExists($sInput) Then Return SetError(1, @error, False)
 	$sOutput = StringRegExpReplace($sOutput, '(\\*)$', '')
@@ -553,8 +610,15 @@ Func __xlsx_compareNatural(Const ByRef $A, Const ByRef $B)
     Return $a_Ret[0]
 EndFunc   ;==>MyCompare
 
-
-
+; escape special xml characters 
+Func __xlsx_escape4xml($sString)
+	$sString = StringReplace($sString, '&', '&amp;', 0, 1)
+	$sString = StringReplace($sString, '"', '&quot;', 0, 1)
+	$sString = StringReplace($sString, "'", '&apos;', 0, 1)
+	$sString = StringReplace($sString, '<', '&lt;', 0, 1)
+	$sString = StringReplace($sString, '>', '&gt;', 0, 1)
+	Return $sString
+EndFunc
 
 ; returns value of a single xml-dom-node and handles errors
 Func __xmlSingleText(ByRef $oXML, Const $sXPath)
