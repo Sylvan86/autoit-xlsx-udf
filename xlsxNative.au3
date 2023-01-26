@@ -17,7 +17,7 @@
 ; Description ...: reads single worksheets of an Excel xlsx-file into an array
 ; Syntax ........: _xlsx_2Array(Const $sFile [, Const $iSheetNr = 1 [, $dRowFrom = 1 [, $dRowTo = Default]]])
 ; Parameters ....: $sFile      - path-string of the xlsx-file
-;                  $iSheetNr   - id (1-based) of the target worksheet
+;                  $iSheetNr   - id (1-based) of the target worksheet (like determined with _xlsx_getWorkSheets())
 ;                  $dRowFrom   - row number (1-based) where to start the extraction
 ;                  $dRowTo   - row number (1-based) where to stop the extraction
 ; Return values .: Success - Return 2D-Array with the worksheet content
@@ -56,7 +56,7 @@ Func _xlsx_2Array(Const $sFile, Const $iSheetNr = 1, $dRowFrom = 1, $dRowTo = De
 
 	; determine sheet file
 	Local $mSheets = $mFiles["Worksheets"]
-	If Not MapExists($mSheets, $iSheetNr -1) Then
+	If Not MapExists($mSheets, $iSheetNr - 1) Then
 		DirRemove($pthWorkDir, 1)
 		Return SetError(4, UBound($mSheets), False)
 	EndIf
@@ -189,54 +189,33 @@ EndFunc   ;==>_xlsx_WriteFromArray
 ;                              = 4 - error loading the workbook.xml
 ;                              = 5 - error determine the sheets node inside the workbook.xml
 ; Author ........: AspirinJunkie
-; Last changed ..: 2022-01-22
+; Last changed ..: 2022-01-26
 ; =================================================================================================
 Func _xlsx_getWorkSheets(Const $sFile)
 	Local $pthWorkDir = @TempDir & "\xlsxWork\"
 
-	; unpack xlsx-file
-	__xlsx_unzip($sFile, $pthWorkDir, "workbook.xml *.rels")
-	If @error Then Return SetError(1, @error, False)
+	__xlsx_unzip($sFile, $pthWorkDir, "xl\*.xml _rels\.rels xl\_rels\*.rels")
+	If @error Then
+		DirRemove($pthWorkDir, 1)
+		Return SetError(3, @error, False)
+	EndIf
 
-	; determine workbook file and their path
-	Local $oXML = __xlsx_getXMLObject()
-	If Not $oXML.load($pthWorkDir & "\_rels\.rels") Then Return SetError(2, 0, False)
-	Local $sSubPath, $sWorkbook
-	For $oRS In $oXML.selectNodes('//Relationship')
-		If StringRegExp($oRS.getAttribute("Type"), 'officeDocument$') Then
-			$sWorkbook = StringRegExpReplace($oRS.getAttribute("Target"), '^.+\/', '')
-			$sSubPath = StringRegExpReplace($oRS.getAttribute("Target"), '\/[^\/]+$', '')
-			ExitLoop
-		EndIf
-	Next
-	If $sWorkbook = "" Then Return SetError(3, 0, False)
+	Local $mFiles = __xlsx_getSubFiles($pthWorkDir)
+	If @error Then
+		DirRemove($pthWorkDir, 1)
+		Return SetError(1, @error, Null)
+	EndIf
 
-	; load and parse the workbook.xml:
-	If Not $oXML.load($pthWorkDir & "xl\" & $sWorkbook) Then Return SetError(4, 0, False)
+	Local $mSheets = $mFiles["Worksheets"]
+	Local $aRet[UBound($mSheets)][2]
 
-	; determine the sheets list
-	Local $oSheets = $oXML.selectNodes('//sheets/sheet'), $oSheet
-	If Not IsObj($oSheets) THen Return SetError(5,0, False)
-
-	; prepare the data as an array
-	Local $aRet[$oSheets.length][3], $iC = 0
-	For $oSheet in $oSheets
-		For $oAttribute In $oSheet.attributes
-			Switch $oAttribute.name
-				Case "r:id"
-					$aRet[$iC][0] = StringRegExpReplace($oAttribute.value, "\D+", "")
-				Case "name"
-					$aRet[$iC][1] = $oAttribute.value
-				Case "sheetId"
-					$aRet[$iC][2] = $oAttribute.value
-			EndSwitch
-		Next
-		$iC += 1
+	For $i = 0 To UBound($aRet) - 1
+		$mSheet = $mSheets[$i]
+		$aRet[$i][0] = $i + 1
+		$aRet[$i][1] = $mSheet["Name"]
 	Next
 
-	; remove temporary data
 	DirRemove($pthWorkDir, 1)
-
 	Return $aRet
 EndFunc   ;==>_xlsx_2Array
 
@@ -398,38 +377,44 @@ Func __xlsx_getSubFiles($pthWorkDir = @TempDir & "\xlsxWork\")
 	;  determine main workbook file and their path
 	Local $sSubPath = $pthWorkDir, $sWorkbook
 	If Not $oXML.load($pthWorkDir & "\_rels\.rels") Then Return SetError(1, 0, False)
-	For $oRS In $oXML.selectNodes('//Relationship')
+	Local $sPre = $oXML.documentElement.prefix
+	If $sPre <> "" Then $sPre &= ":"
+	For $oRS In $oXML.selectNodes('//' & $sPre & 'Relationship')
 		If StringRegExp($oRS.getAttribute("Type"), 'officeDocument$') Then
 			$mRet["WorkbookFileName"] = StringRegExpReplace($oRS.getAttribute("Target"), '^.+\/', '')
-			$sSubPath = $pthWorkDir & StringRegExpReplace($oRS.getAttribute("Target"), '\/[^\/]+$', '') & "\"
-			$mRet["WorkbookPath"] = $sSubPath
+			$sSubPath = StringRegExpReplace($oRS.getAttribute("Target"), '\/?(.+?)\/[^\/]+$', '$1') & "\"
+			$mRet["WorkbookPath"] = $pthWorkDir & $sSubPath
 			ExitLoop
 		EndIf
 	Next
 	If $mRet["WorkbookFileName"] = "" Then Return SetError(2, 0, False)
 
 	; determine the relevant files
-	If Not $oXML.load($sSubPath & "_rels\" & $mRet.WorkbookFileName & ".rels") Then Return SetError(3, 0, False)
+	If Not $oXML.load($pthWorkDir & $sSubPath & "_rels\" & $mRet.WorkbookFileName & ".rels") Then Return SetError(3, 0, False)
+	Local $sPre = $oXML.documentElement.prefix
+	If $sPre <> "" Then $sPre &= ":"
 	Local $sTarget, $sId, $mSheetsByID[]
-	For $oRS In $oXML.selectNodes('//Relationship')
+	For $oRS In $oXML.selectNodes('//' & $sPre & 'Relationship')
 		$sId = $oRS.getAttribute("Id")
 		$sTarget = $oRS.getAttribute("Target")
 
 		; differentiate by type
 		Switch StringRegExpReplace($oRS.getAttribute("Type"), '.*?([^\/]+)$', '$1', 1)
 			Case "worksheet"
-				$mSheetsByID[$sId] = $sSubPath & $sTarget
+				$mSheetsByID[$sId] = __xlsx_Target2AbsolutePath($sTarget, $pthWorkDir, $sSubPath)
 			Case "sharedStrings"
-				$mRet["SharedStringsFile"] = $sSubPath & $sTarget
+				$mRet["SharedStringsFile"] = __xlsx_Target2AbsolutePath($sTarget, $pthWorkDir, $sSubPath)
 			Case Else
 				ContinueLoop
 		EndSwitch
 	Next
 
 	; determine the the sheet names and their order
-	If Not $oXML.load($sSubPath & $mRet.WorkbookFileName) Then Return SetError(4, 0, False)
+	If Not $oXML.load($mRet["WorkbookPath"] & $mRet.WorkbookFileName) Then Return SetError(4, 0, False)
+	Local $sPre = $oXML.documentElement.prefix
+	If $sPre <> "" Then $sPre &= ":"
 	Local  $mSheets[]
-	For $oSheet In $oXML.selectNodes('//sheets/sheet')
+	For $oSheet In $oXML.selectNodes('//' & $sPre & 'sheets/' & $sPre & 'sheet')
 		Local $mSheet[]
 
 		$mSheet["Name"] = $oSheet.getAttribute("name")
@@ -576,6 +561,16 @@ Func __xlsx_getXMLObject()
 	EndIf
 	Return $oX
 EndFunc   ;==>__xlsx_getXMLObject
+
+; convert the target-attributes into an absolute file path
+Func __xlsx_Target2AbsolutePath($sTarget, $pthWorkDir = @TempDir & "\xlsxWork\", $sSubPath = "xl")
+	If StringRight($pthWorkDir, 1) <> "\" Then $pthWorkDir &= "\"
+
+	$sTarget = StringRegExpReplace($sTarget, '\/?(.+?)\/([^\/]+)$', '$1/$2')
+	If Not FileExists($pthWorkDir & $sTarget) Then $sTarget = $sSubPath & "/" & $sTarget
+
+	Return $pthWorkDir & $sTarget
+EndFunc
 
 #EndRegion xlsx specific helper functions
 
