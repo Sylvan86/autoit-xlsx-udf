@@ -3,12 +3,12 @@
 
 ; #INDEX# =======================================================================================================================
 ; Title .........: xlsxNative
-; Version .......: 0.5
+; Version .......: 0.6
 ; AutoIt Version : 3.3.14.5
 ; Language ......: English
 ; Description ...: Functions to read/write data from/to Excel-xlsx files without the need of having excel installed
 ; Author(s) .....: AspirinJunkie
-; Last changed ..: 2021-05-26
+; Last changed ..: 2022-01-22
 ; ===============================================================================================================================
 
 
@@ -87,7 +87,7 @@ EndFunc   ;==>_xlsx_2Array
 ; Last changed ..: 2021-03-29
 ; =================================================================================================
 Func _xlsx_WriteFromArray(Const $sFile, ByRef $aArray)
-	Local $pthWorkDir = @TempDir & "\xlsxWork\"
+	Local $pthWorkDir = @TempDir & "\xlsxWork\", $dSuccess
 
 	; convert 1D Array to 2D-Array if needed:
 	If UBound($aArray, 0) = 1 Then
@@ -101,32 +101,32 @@ Func _xlsx_WriteFromArray(Const $sFile, ByRef $aArray)
 	EndIf
 
 	; [Content_Types].xml
-	DirCreate($pthWorkDir)
-	If @error Then Return SetError(2, 1, False)
-	FileWrite($pthWorkDir & '[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="bin" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.printerSettings" /><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml" /><Default Extension="xml" ContentType="application/xml" /><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml" /><Override PartName="/xl/worksheets/sheet.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml" /></Types>')
-	If @error Then Return SetError(3, 1, False)
+	$dSuccess = DirCreate($pthWorkDir)
+	If $dSuccess = 0 Then Return SetError(2, 1, False)
+	$dSuccess = FileWrite($pthWorkDir & '[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="bin" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.printerSettings" /><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml" /><Default Extension="xml" ContentType="application/xml" /><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml" /><Override PartName="/xl/worksheets/sheet.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml" /></Types>')
+	If $dSuccess = 0 Then Return SetError(3, 1, False)
 
 	; .rels
-	DirCreate($pthWorkDir & '_rels')
-	If @error Then Return SetError(2, 2, False)
-	FileWrite($pthWorkDir & '_rels\.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>')
-	If @error Then Return SetError(3, 2, False)
+	$dSuccess = DirCreate($pthWorkDir & '_rels')
+	If $dSuccess = 0 Then Return SetError(2, 2, False)
+	$dSuccess = FileWrite($pthWorkDir & '_rels\.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>')
+	If $dSuccess = 0 Then Return SetError(3, 2, False)
 
 	; workbook.xml
-	DirCreate($pthWorkDir & 'xl')
-	If @error Then Return SetError(2, 3, False)
-	FileWrite($pthWorkDir & 'xl\workbook.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="1" sheetId="1" r:id="rId1" /></sheets></workbook>')
-	If @error Then Return SetError(3, 3, False)
+	$dSuccess = DirCreate($pthWorkDir & 'xl')
+	If $dSuccess = 0 Then Return SetError(2, 3, False)
+	$dSuccess = FileWrite($pthWorkDir & 'xl\workbook.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="1" sheetId="1" r:id="rId1" /></sheets></workbook>')
+	If $dSuccess = 0 Then Return SetError(3, 3, False)
 
 	; workbook.xml.rels
-	DirCreate($pthWorkDir & 'xl\_rels')
-	If @error Then Return SetError(2, 4, False)
-	FileWrite($pthWorkDir & 'xl\_rels\workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet.xml"/></Relationships>')
-	If @error Then Return SetError(3, 4, False)
+	$dSuccess = DirCreate($pthWorkDir & 'xl\_rels')
+	If $dSuccess = 0 Then Return SetError(2, 4, False)
+	$dSuccess = FileWrite($pthWorkDir & 'xl\_rels\workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet.xml"/></Relationships>')
+	If $dSuccess = 0 Then Return SetError(3, 4, False)
 
 	; sheet.xml
-	DirCreate($pthWorkDir & 'xl\worksheets')
-	If @error Then Return SetError(2, 5, False)
+	$dSuccess = DirCreate($pthWorkDir & 'xl\worksheets')
+	If $dSuccess = 0 Then Return SetError(2, 5, False)
 	Local $sSheet = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetData>'
 	For $r = 0 To UBound($aA) - 1
 		$sSheet &= '<row>'
@@ -148,8 +148,8 @@ Func _xlsx_WriteFromArray(Const $sFile, ByRef $aArray)
 		$sSheet &= '</row>'
 	Next
 	$sSheet &= '</sheetData></worksheet>'
-	FileWrite($pthWorkDir & 'xl\worksheets\sheet.xml', $sSheet)
-	If @error Then Return SetError(3, 5, False)
+	$dSuccess = FileWrite($pthWorkDir & 'xl\worksheets\sheet.xml', $sSheet)
+	If $dSuccess = 0 Then Return SetError(3, 5, False)
 
 	; zip to xlsx
 	FileDelete($sFile)
@@ -205,10 +205,18 @@ Func _xlsx_getWorkSheets(Const $sFile)
 	If Not IsObj($oSheets) THen Return SetError(5,0, False)
 
 	; prepare the data as an array
-	Local $aRet[$oSheets.length][2], $iC = 0
+	Local $aRet[$oSheets.length][3], $iC = 0
 	For $oSheet in $oSheets
-		$aRet[$iC][0] = $oSheet.getAttribute("sheetId")
-		$aRet[$iC][1] = $oSheet.getAttribute("name")
+		For $oAttribute In $oSheet.attributes
+			Switch $oAttribute.name
+				Case "r:id"
+					$aRet[$iC][0] = StringRegExpReplace($oAttribute.value, "\D+", "")
+				Case "name"
+					$aRet[$iC][1] = $oAttribute.value
+				Case "sheetId"
+					$aRet[$iC][2] = $oAttribute.value
+			EndSwitch
+		Next
 		$iC += 1
 	Next
 
@@ -359,11 +367,13 @@ EndFunc   ;==>__xlsx_readCells
 ;                              = 2 - no workbook file determined
 ;                              = 3 - no .rel-file connected to the workbook found
 ;                              = 4 - no worksheets found
+;                              = 5 - error creating the xml-object
 ; Author ........: AspirinJunkie
 ; Last changed ..: 2021-05-26
 ; =================================================================================================
 Func __xlsx_getSubFiles($pthWorkDir = @TempDir & "\xlsxWork\")
 	Local $oXML = __xlsx_getXMLObject()
+	If @error Then Return SetError(5, @error, 0)
 
 	; determine workbook file and their path
 	If Not $oXML.load($pthWorkDir & "\_rels\.rels") Then Return SetError(1, 0, False)
@@ -512,6 +522,7 @@ EndFunc   ;==>__xlsxExcel2Date
 Func __xlsx_getXMLObject()
 	Local Static $c = 0
 	Local Static $oX = ObjCreate("Microsoft.XMLDOM")
+	If @error Then Return SetError(@error, @extended, 0)
 
 	If $c = 0 Then
 		With $oX
