@@ -8,29 +8,30 @@
 ; Language ......: English
 ; Description ...: Functions to read/write data from/to Excel-xlsx files without the need of having excel installed
 ; Author(s) .....: AspirinJunkie
-; Last changed ..: 2022-01-22
+; Last changed ..: 2022-01-26
 ; ===============================================================================================================================
 
 
 ; #FUNCTION# ======================================================================================
 ; Name ..........: _xlsx_2Array
 ; Description ...: reads single worksheets of an Excel xlsx-file into an array
-; Syntax ........: _xlsx_2Array(Const $sFile [, Const $sSheetNr = 1 [, $dRowFrom = 1 [, $dRowTo = Default]]])
+; Syntax ........: _xlsx_2Array(Const $sFile [, Const $iSheetNr = 1 [, $dRowFrom = 1 [, $dRowTo = Default]]])
 ; Parameters ....: $sFile      - path-string of the xlsx-file
-;                  $sSheetNr   - id (1-based) of the target worksheet
+;                  $iSheetNr   - id (1-based) of the target worksheet
 ;                  $dRowFrom   - row number (1-based) where to start the extraction
 ;                  $dRowTo   - row number (1-based) where to stop the extraction
 ; Return values .: Success - Return 2D-Array with the worksheet content
 ;                  Failure - Return False and set @error to:
 ;        				@error = 1 - error importing shared-string list (@extended = @error of __xlsx_readSharedStrings)
 ;                              = 2 - error reading cell-values (@extended = @error of __xlsx_readCells)
-;                              = 3 - error unpacking the xlsx-file (@extended = @error of __unzip)
+;                              = 3 - error unpacking the xlsx-file (@extended = @error of __xlsx_unzip)
+;                              = 4 - worksheet # doesn't exists
+;                              = 5 - wrong filepath for sheet-document
 ; Author ........: AspirinJunkie
-; Last changed ..: 2021-05-26
+; Last changed ..: 2022-01-26
 ; =================================================================================================
-Func _xlsx_2Array(Const $sFile, Const $sSheetNr = 1, $dRowFrom = 1, $dRowTo = Default)
+Func _xlsx_2Array(Const $sFile, Const $iSheetNr = 1, $dRowFrom = 1, $dRowTo = Default)
 	Local $pthWorkDir = @TempDir & "\xlsxWork\"
-	Local $pthStrings = $pthWorkDir & "xl\sharedStrings.xml"
 
 	; correct wrong values for  $dRowFrom and $dRowTo
 	If $dRowFrom < 1 Or Not IsInt($dRowFrom) Then $dRowFrom = 1
@@ -40,23 +41,36 @@ Func _xlsx_2Array(Const $sFile, Const $sSheetNr = 1, $dRowFrom = 1, $dRowTo = De
 	EndIf
 
 	; unpack xlsx-file
-	__unzip($sFile, $pthWorkDir, "shared*.xml sheet.xml sheet" & $sSheetNr & ".xml *.rels")
-	If @error Then Return SetError(3, @error, False)
+	__xlsx_unzip($sFile, $pthWorkDir, "xl\*.xml _rels\.rels xl\_rels\*.rels")
+	If @error Then
+		DirRemove($pthWorkDir, 1)
+		Return SetError(3, @error, False)
+	EndIf
 
 	; determine file paths:
-	Local $aFiles = __xlsx_getSubFiles($pthWorkDir)
-	If @error Then Return SetError(1, @error, False)
+	Local $mFiles = __xlsx_getSubFiles($pthWorkDir)
+	If @error Then
+		DirRemove($pthWorkDir, 1)
+		Return SetError(1, @error, False)
+	EndIf
 
 	; determine sheet file
-	If $sSheetNr + 1 > UBound($aFiles) Then Return SetError(4, UBound($aFiles) - 1, False)
-	Local $pthSheet = $pthWorkDir & $aFiles[$sSheetNr]
-	If Not FileExists($pthSheet) Then Return SetError(5, 0, False)
+	Local $mSheets = $mFiles["Worksheets"]
+	If Not MapExists($mSheets, $iSheetNr -1) Then
+		DirRemove($pthWorkDir, 1)
+		Return SetError(4, UBound($mSheets), False)
+	EndIf
+	Local $pthSheet = ($mSheets[$iSheetNr - 1])["File"]
+	If Not FileExists($pthSheet) Then
+		DirRemove($pthWorkDir, 1)
+		Return SetError(5, 0, False)
+	EndIf
 
 	; read shared strings into an 1D-array
-	If $aFiles[0] == "" Then
+	If (Not MapExists($mFiles, "SharedStringsFile")) Or (Not FileExists($mFiles["SharedStringsFile"])) Then
 		Local $aStrings[0]
 	Else
-		Local $aStrings = __xlsx_readSharedStrings($pthWorkDir & $aFiles[0])
+		Local $aStrings = __xlsx_readSharedStrings($mFiles["SharedStringsFile"])
 		If @error Then Local $aStrings[0]
 	EndIf
 
@@ -153,7 +167,7 @@ Func _xlsx_WriteFromArray(Const $sFile, ByRef $aArray)
 
 	; zip to xlsx
 	FileDelete($sFile)
-	__zip($pthWorkDir & "*", $sFile)
+	__xlsx_zip($pthWorkDir & "*", $sFile)
 	If @error Then Return SetError(4, @error, False)
 
 	; remove temporary data
@@ -181,7 +195,7 @@ Func _xlsx_getWorkSheets(Const $sFile)
 	Local $pthWorkDir = @TempDir & "\xlsxWork\"
 
 	; unpack xlsx-file
-	__unzip($sFile, $pthWorkDir, "workbook.xml *.rels")
+	__xlsx_unzip($sFile, $pthWorkDir, "workbook.xml *.rels")
 	If @error Then Return SetError(1, @error, False)
 
 	; determine workbook file and their path
@@ -366,42 +380,69 @@ EndFunc   ;==>__xlsx_readCells
 ;        				@error = 1 - no global .rels file found
 ;                              = 2 - no workbook file determined
 ;                              = 3 - no .rel-file connected to the workbook found
-;                              = 4 - no worksheets found
+;                              = 4 - error opening the workbook file
 ;                              = 5 - error creating the xml-object
 ; Author ........: AspirinJunkie
-; Last changed ..: 2021-05-26
+; Last changed ..: 2022-01-26
 ; =================================================================================================
 Func __xlsx_getSubFiles($pthWorkDir = @TempDir & "\xlsxWork\")
+	If StringRight($pthWorkDir, 1) <> "\" Then $pthWorkDir &= "\"
+
+	; unpack xlsx-file
 	Local $oXML = __xlsx_getXMLObject()
 	If @error Then Return SetError(5, @error, 0)
 
-	; determine workbook file and their path
+	; Map for paths
+	Local $mRet[]
+
+	;  determine main workbook file and their path
+	Local $sSubPath = $pthWorkDir, $sWorkbook
 	If Not $oXML.load($pthWorkDir & "\_rels\.rels") Then Return SetError(1, 0, False)
-	Local $sSubPath, $sWorkbook
 	For $oRS In $oXML.selectNodes('//Relationship')
 		If StringRegExp($oRS.getAttribute("Type"), 'officeDocument$') Then
-			$sWorkbook = StringRegExpReplace($oRS.getAttribute("Target"), '^.+\/', '')
-			$sSubPath = StringRegExpReplace($oRS.getAttribute("Target"), '\/[^\/]+$', '')
+			$mRet["WorkbookFileName"] = StringRegExpReplace($oRS.getAttribute("Target"), '^.+\/', '')
+			$sSubPath = $pthWorkDir & StringRegExpReplace($oRS.getAttribute("Target"), '\/[^\/]+$', '') & "\"
+			$mRet["WorkbookPath"] = $sSubPath
 			ExitLoop
 		EndIf
 	Next
-	If $sWorkbook = "" Then Return SetError(2, 0, False)
+	If $mRet["WorkbookFileName"] = "" Then Return SetError(2, 0, False)
 
-	; determine sheet file and sharedstrings if available
-	Local $sSheetPath, $aRet[1]
-	If Not $oXML.load($pthWorkDir & "\" & $sSubPath & "\_rels\" & $sWorkbook & ".rels") Then Return SetError(3, 0, False)
+	; determine the relevant files
+	If Not $oXML.load($sSubPath & "_rels\" & $mRet.WorkbookFileName & ".rels") Then Return SetError(3, 0, False)
+	Local $sTarget, $sId, $mSheetsByID[]
 	For $oRS In $oXML.selectNodes('//Relationship')
-		Local $sType = $oRS.getAttribute("Type"), $sTarget = $oRS.getAttribute('Target')
-		If StringRegExp($sType, 'worksheet$') Then _ArrayAdd($aRet, StringRegExp($sTarget, '^\Q' & $sSubPath) ? $sTarget : $sSubPath & "/" & $sTarget)
-		If StringRegExp($sType, 'sharedStrings$') Then $aRet[0] = StringRegExp($sTarget, '^\Q' & $sSubPath) ? $sTarget : $sSubPath & "/" & $sTarget
+		$sId = $oRS.getAttribute("Id")
+		$sTarget = $oRS.getAttribute("Target")
+
+		; differentiate by type
+		Switch StringRegExpReplace($oRS.getAttribute("Type"), '.*?([^\/]+)$', '$1', 1)
+			Case "worksheet"
+				$mSheetsByID[$sId] = $sSubPath & $sTarget
+			Case "sharedStrings"
+				$mRet["SharedStringsFile"] = $sSubPath & $sTarget
+			Case Else
+				ContinueLoop
+		EndSwitch
 	Next
-	If UBound($aRet) = 1 Then Return SetError(4, 0, False)
 
-	; sort because sheet files are randomized:
-	_xlsx_ArraySortNatural($aRet, 1)
+	; determine the the sheet names and their order
+	If Not $oXML.load($sSubPath & $mRet.WorkbookFileName) Then Return SetError(4, 0, False)
+	Local  $mSheets[]
+	For $oSheet In $oXML.selectNodes('//sheets/sheet')
+		Local $mSheet[]
 
-	Return SetExtended($aRet[0] == "", $aRet)
+		$mSheet["Name"] = $oSheet.getAttribute("name")
+		$mSheet["ID"] = $oSheet.getAttribute("sheetId") ; senseless information?
+		$mSheet["File"] = MapExists($mSheetsByID, $oSheet.getAttribute("r:id")) ? $mSheetsByID[$oSheet.getAttribute("r:id")] : Null
+
+		MapAppend($mSheets, $mSheet)
+	Next
+	$mRet["Worksheets"] = $mSheets
+
+	Return SetExtended(UBound($mSheets), $mRet)
 EndFunc   ;==>__xlsx_getSubFiles
+
 
 ; #FUNCTION# ======================================================================================
 ; Name ..........: __xlsx_readSharedStrings
@@ -542,7 +583,7 @@ EndFunc   ;==>__xlsx_getXMLObject
 
 #Region general helper functions
 
-Func __unzip($sInput, $sOutput, Const $sPattern = "")
+Func __xlsx_unzip($sInput, $sOutput, Const $sPattern = "")
 	; TODO: maybe powershell "	" or jar is faster than shell.application
 	; RunWait(StringFormat('powershell.exe -Command "Expand-Archive -LiteralPath ''%s'' -DestinationPath ''%s'' -Force"', $sFile, $sOutPath), "", @SW_HIDE)
 	; but!: expand-archive can only handle files with zip-ending. so still have to rename or copy to a zip-file
@@ -565,11 +606,10 @@ Func __unzip($sInput, $sOutput, Const $sPattern = "")
 		FileDelete(@TempDir & "\tmp.zip")
 	EndIf
 	Return 1
-EndFunc   ;==>__unzip
+EndFunc   ;==>__xlsx_unzip
 
-
-
-Func __zip($sInput, $sOutput)
+; compress a folder content into a zip-file (file extension doesn't have to be .zip)
+Func __xlsx_zip($sInput, $sOutput)
 	Local $iExitCode
 
 	;  $iExitCode = RunWait(StringFormat('zip.exe -qr -9 "%s" .'', $sInput, $sOutput & ".zip"), "", @SW_HIDE)
@@ -586,42 +626,9 @@ Func __zip($sInput, $sOutput)
 		EndIf
 	EndIf
 	Return 1
-EndFunc   ;==>__zip
+EndFunc   ;==>__xlsx_zip
 
-; #FUNCTION# ======================================================================================
-; Name ..........: _xlsx_ArraySortNatural
-; Description ...: sort an array like the explorer would
-; Syntax ........:_xlsx_ArraySortNatural(ByRef $A, [Const $i_Min = 0, [Const $i_Max = UBound($a_Array) - 1,{Const $b_First = True}]])
-; Parameters ....: $a_Array       - the array which should be sorted (by reference means direct manipulating of the array - no copy)
-;                  $i_Min         - the start index for the sorting range in the array
-;                  $i_Max         - the end index for the sorting range in the array
-; Return values .: Success: True  - array is sorted now
-; Author ........: AspirinJunkie
-; =================================================================================================
-Func _xlsx_ArraySortNatural(ByRef $A, Const $i_Min = 0, Const $i_Max = UBound($A) - 1)
-	Local $t1, $t2
-	For $i = $i_Min + 1 To $i_Max
-		$t1 = $A[$i]
-		For $j = $i - 1 To $i_Min Step -1
-			$t2 = $A[$j]
-			If __xlsx_compareNatural($t1, $t2) <> -1 Then ExitLoop
-			$A[$j + 1] = $t2
-		Next
-		$A[$j + 1] = $t1
-	Next
-	Return True
-EndFunc   ;==>_xlsx_ArraySortNatural
-
-; Vergleichsfunktion als Wrapper für StrCmpLogicalW welche wie der Explorer intuitiver sortiert falls Zahlenwerte in den Strings vorkommen
-Func __xlsx_compareNatural(Const ByRef $A, Const ByRef $B)
-	Local Static $h_DLL_Shlwapi = DllOpen("Shlwapi.dll")
-	If Not IsString($A) Or Not IsString($B) Then Return $A > $B ? 1 : $A < $B ? -1 : 0
-    Local $a_Ret = DllCall($h_DLL_Shlwapi, "int", "StrCmpLogicalW", "wstr", $A, "wstr", $B)
-    If @error Then Return SetError(1, @error, 0)
-    Return $a_Ret[0]
-EndFunc   ;==>MyCompare
-
-; escape special xml characters 
+; escape special xml characters
 Func __xlsx_escape4xml($sString)
 	$sString = StringReplace($sString, '&', '&amp;', 0, 1)
 	$sString = StringReplace($sString, '"', '&quot;', 0, 1)
