@@ -8,7 +8,7 @@
 ; Language ......: English
 ; Description ...: Functions to read/write data from/to Excel-xlsx files without the need of having excel installed
 ; Author(s) .....: AspirinJunkie
-; Last changed ..: 2022-01-26
+; Last changed ..: 2023-01-26
 ; ===============================================================================================================================
 
 
@@ -19,7 +19,9 @@
 ; Parameters ....: $sFile      - path-string of the xlsx-file
 ;                  $iSheetNr   - id (1-based) of the target worksheet (like determined with _xlsx_getWorkSheets())
 ;                  $dRowFrom   - row number (1-based) where to start the extraction
-;                  $dRowTo   - row number (1-based) where to stop the extraction
+;                  $dRowTo     - row number (1-based) where to stop the extraction
+;                  $dColFrom   - column number (1-based) where to start the extraction
+;                  $dColTo     - column number (1-based) where to stop the extraction
 ; Return values .: Success - Return 2D-Array with the worksheet content
 ;                  Failure - Return False and set @error to:
 ;        				@error = 1 - error importing shared-string list (@extended = @error of __xlsx_readSharedStrings)
@@ -28,9 +30,9 @@
 ;                              = 4 - worksheet # doesn't exists
 ;                              = 5 - wrong filepath for sheet-document
 ; Author ........: AspirinJunkie
-; Last changed ..: 2022-01-26
+; Last changed ..: 2023-01-26
 ; =================================================================================================
-Func _xlsx_2Array(Const $sFile, Const $iSheetNr = 1, $dRowFrom = 1, $dRowTo = Default)
+Func _xlsx_2Array(Const $sFile, Const $iSheetNr = 1, $dRowFrom = 1, $dRowTo = Default, $dColFrom = 1, $dColTo = Default)
 	Local $pthWorkDir = @TempDir & "\xlsxWork\"
 
 	; correct wrong values for  $dRowFrom and $dRowTo
@@ -38,6 +40,13 @@ Func _xlsx_2Array(Const $sFile, Const $iSheetNr = 1, $dRowFrom = 1, $dRowTo = De
 	If $dRowFrom > $dRowTo Then
 		$dRowFrom = 1
 		$dRowTo = Default
+	EndIf
+
+	; correct wrong values for  $dColFrom and $dColTo
+	If $dColFrom < 1 Or Not IsInt($dColFrom) Then $dColFrom = 1
+	If $dColFrom > $dColTo Then
+		$dColFrom = 1
+		$dColTo = Default
 	EndIf
 
 	; unpack xlsx-file
@@ -75,7 +84,7 @@ Func _xlsx_2Array(Const $sFile, Const $iSheetNr = 1, $dRowFrom = 1, $dRowTo = De
 	EndIf
 
 	; read all cells into an 2D-array
-	Local $aCells = __xlsx_readCells($pthSheet, $aStrings, $dRowFrom, $dRowTo)
+	Local $aCells = __xlsx_readCells($pthSheet, $aStrings, $dRowFrom, $dRowTo, $dColFrom, $dColTo)
 	If @error Then Return SetError(2, @error, False)
 
 	; remove temporary data
@@ -189,7 +198,7 @@ EndFunc   ;==>_xlsx_WriteFromArray
 ;                              = 4 - error loading the workbook.xml
 ;                              = 5 - error determine the sheets node inside the workbook.xml
 ; Author ........: AspirinJunkie
-; Last changed ..: 2022-01-26
+; Last changed ..: 2023-01-26
 ; =================================================================================================
 Func _xlsx_getWorkSheets(Const $sFile)
 	Local $pthWorkDir = @TempDir & "\xlsxWork\"
@@ -228,7 +237,9 @@ EndFunc   ;==>_xlsx_2Array
 ; Parameters ....: $sFile      - path-string of the worksheet-xml
 ;                  $aStrings   - array with shared strings (return value of __xlsx_readSharedStrings)
 ;                  $dRowFrom   - row number (1-based) where to start the extraction
-;                  $dRowTo   - row number (1-based) where to stop the extraction
+;                  $dRowTo     - row number (1-based) where to stop the extraction
+;                  $dColFrom   - column number (1-based) where to start the extraction
+;                  $dColTo     - column number (1-based) where to stop the extraction
 ; Return values .: Success - Return 2D-Array with the worksheet content
 ;                  Failure - Return False and set @error to:
 ;        				@error = 1 - cannot create XMLDOM-Object
@@ -237,9 +248,9 @@ EndFunc   ;==>_xlsx_2Array
 ;                              = 4 - cannot determine worksheet dimensions
 ;                              = 5 - wrong string id in shared-string value
 ; Author ........: AspirinJunkie
-; Last changed ..: 2020-07-27
+; Last changed ..: 2023-01-26
 ; =================================================================================================
-Func __xlsx_readCells(Const $sFile, ByRef $aStrings, Const $dRowFrom = 1, $dRowTo = Default)
+Func __xlsx_readCells(Const $sFile, ByRef $aStrings, Const $dRowFrom = 1, $dRowTo = Default, $dColFrom = 1, $dColTo = Default)
 	; TODO: currently only the variant with attribute "r" (cell coordinate) implemented. Instead of this it's possible to define the cells sequential without the "r"-attribute.
 
 	Local $oXML = __xlsx_getXMLObject()
@@ -262,23 +273,27 @@ Func __xlsx_readCells(Const $sFile, ByRef $aStrings, Const $dRowFrom = 1, $dRowT
 		For $oCell In $oCells
 			$sR = $oCell.GetAttribute("r")
 			$aCoords = __xlsx_CellstringToRowColumn($sR)
-			$oCell.SetAttribute("zeile", $aCoords[1])
-			$oCell.SetAttribute("spalte", $aCoords[0] - 1)
+			$oCell.SetAttribute("row", $aCoords[1])
+			$oCell.SetAttribute("column", $aCoords[0] - 1)
 			If $aCoords[0] > $dColumnMax Then $dColumnMax = $aCoords[0]
 			If $aCoords[1] > $dRowMax Then $dRowMax = $aCoords[1]
 		Next
 
 		; create output array
 		If $dRowTo <> Default Then $dRowMax = $dRowTo > $dRowMax ? $dRowMax : $dRowTo
-		Local $aRet[$dRowMax - $dRowFrom + 1][$dColumnMax]
+		If $dColTo <> Default Then $dColumnMax = $dColTo > $dColumnMax ? $dColumnMax : $dColTo
+		Local $aRet[$dRowMax - $dRowFrom + 1][$dColumnMax - $dColFrom + 1]
 
 		; read cell values
 		Local $i = 0, $sTmp
 		For $oCell In $oCells
 			$i += 1
 
-			Local $dRow = $oCell.GetAttribute("zeile")
+			; check user defined boundaries for row and column
+			Local $dRow = $oCell.GetAttribute("row")
 			If $dRow < $dRowFrom Or $dRow > $dRowMax Then ContinueLoop
+			Local $dCol = $oCell.GetAttribute("column")
+			If $dCol < $dColFrom Or $dCol > $dColumnMax Then ContinueLoop
 
 			Switch $oCell.GetAttribute("t")
 				Case "s" ; value = shared string-id
@@ -293,12 +308,13 @@ Func __xlsx_readCells(Const $sFile, ByRef $aStrings, Const $dRowFrom = 1, $dRowT
 				Case "n" ; number (integers, floats, dates, times)
 					$sValue = Number($sValue)
 				; Case "e" ; error
-				; Case "b" ; boolean
+				Case "b" ; boolean
+					$sValue = $sValue = True
 				Case Else ; normal value
 					$sValue = __xmlSingleText($oCell, $sPre & 'v')
 					If StringRegExp($sValue, '(?i)\A(?|0x\d+|[-+]?(?>\d+)(?>\.\d+)?(?:e[-+]?\d+)?)\Z') Then $sValue = Number($sValue) ; if number then convert to number type
 			EndSwitch
-			$aRet[$oCell.GetAttribute("zeile") - $dRowFrom][$oCell.GetAttribute("spalte")] = $sValue
+			$aRet[$oCell.GetAttribute("row") - $dRowFrom][$oCell.GetAttribute("column") - $dColFrom] = $sValue
 		Next
 
 	Else
@@ -306,12 +322,27 @@ Func __xlsx_readCells(Const $sFile, ByRef $aStrings, Const $dRowFrom = 1, $dRowT
 		Local $oVal, $oRows, $oCols
 		$oRows = $oXML.selectNodes('/' & $sPre & 'worksheet/' & $sPre & 'sheetData/' & $sPre & 'row')
 		$oCols = $oXML.selectNodes('/' & $sPre & 'worksheet/' & $sPre & 'sheetData/' & $sPre & 'row[0]/c')
-		Local $aRet[$oRows.length][$oCols.length], $iR = 0, $iC = 0, $oV, $sValue
+		;  Local $aRet[$oRows.length][IsKeyword($dColTo) = 1 ? $oCols.length : $dColTo - $dColFrom + 1], $iR = 0, $iC, $oV, $sValue
+		Local $aRet[$oRows.length][(IsKeyword($dColTo) = 1 ? $oCols.length - $dColFrom + 1 : $dColTo - $dColFrom + 1)], $iR = 0, $iC, $oV, $sValue
 
 		For $oRow In $oXML.selectNodes('/' & $sPre & 'worksheet/' & $sPre & 'sheetData/' & $sPre & 'row')
-			$iC = 0
+			$iR += 1
 
+			If $iR < $dRowFrom Then ContinueLoop
+			If $iR > $dRowTo Then
+				$iR -= 1
+				ExitLoop
+			EndIf
+
+			$iC = 0
 			For $oCell In $oRow.selectNodes('./' & $sPre & 'c')
+				$iC += 1
+				If $iC < $dColFrom Then ContinueLoop
+				If $iC > $dColTo Then
+					$iC -= 1
+					ExitLoop
+				EndIf
+
 				$oV = $oCell.selectSingleNode('./' & $sPre & 'v | ./' & $sPre & 'is')
 				If IsObj($oV) Then
 					$sValue = $oV.text()
@@ -326,7 +357,7 @@ Func __xlsx_readCells(Const $sFile, ByRef $aStrings, Const $dRowFrom = 1, $dRowT
 						Case "str" ; formula
 							; hier steht die Formel selbst in einem [optionalem] <f></f> während der letzte berechnete Wert normal in <v></v> steht.
 							$sValue = __xmlSingleText($oCell, $sPre & 'v')
-							; Case "e" ; error
+						; Case "e" ; error
 						Case "n"  ; number (integers, floats, dates, times)
 							$sValue = Number($sValue)
 						Case "b" ; boolean
@@ -336,13 +367,14 @@ Func __xlsx_readCells(Const $sFile, ByRef $aStrings, Const $dRowFrom = 1, $dRowT
 							If StringRegExp($sValue, '(?i)\A(?|0x\d+|[-+]?(?>\d+)(?>\.\d+)?(?:e[-+]?\d+)?)\Z') Then $sValue = Number($sValue) ; if number then convert to number type
 					EndSwitch
 
-					If $iR > UBound($aRet, 1) - 1 Or $iC > UBound($aRet, 2) - 1 Then ReDim $aRet[$iR + 1][$iC + 1]
-					$aRet[$iR][$iC] = $sValue
+					If UBound($aRet, 2) < $iC - $dColFrom + 1 Then ReDim $aRet[Ubound($aRet)][$iC - $dColFrom + 1]
+
+					$aRet[$iR-$dRowFrom][$iC- $dColFrom] = $sValue
 				EndIf
-				$iC += 1
 			Next
-			$iR += 1
 		Next
+		Redim $aRet[$iR - $dRowFrom + 1][$iC - $dColFrom + 1]
+
 	EndIf
 
 	Return $aRet
@@ -362,7 +394,7 @@ EndFunc   ;==>__xlsx_readCells
 ;                              = 4 - error opening the workbook file
 ;                              = 5 - error creating the xml-object
 ; Author ........: AspirinJunkie
-; Last changed ..: 2022-01-26
+; Last changed ..: 2023-01-26
 ; =================================================================================================
 Func __xlsx_getSubFiles($pthWorkDir = @TempDir & "\xlsxWork\")
 	If StringRight($pthWorkDir, 1) <> "\" Then $pthWorkDir &= "\"
