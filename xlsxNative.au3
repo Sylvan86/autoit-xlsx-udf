@@ -3,12 +3,16 @@
 
 ; #INDEX# =======================================================================================================================
 ; Title .........: xlsxNative
-; Version .......: 0.6
+; Version .......: 0.7
 ; AutoIt Version : 3.3.14.5
 ; Language ......: English
 ; Description ...: Functions to read/write data from/to Excel-xlsx files without the need of having excel installed
 ; Author(s) .....: AspirinJunkie
 ; Last changed ..: 2023-01-26
+; License .......: This work is free.
+;                  You can redistribute it and/or modify it under the terms of the Do What The Fuck You Want To Public License, Version 2,
+;                  as published by Sam Hocevar.
+;                  See http://www.wtfpl.net/ for more details.
 ; ===============================================================================================================================
 
 
@@ -233,7 +237,7 @@ EndFunc   ;==>_xlsx_2Array
 ; #FUNCTION# ======================================================================================
 ; Name ..........: __xlsx_readCells
 ; Description ...: import xlsx worksheet values
-; Syntax ........: __xlsx_readCells(Const $sFile, ByRef $aStrings [, $dRowFrom = 1 [, $dRowTo = Default]])
+; Syntax ........: __xlsx_readCells(Const $sFile, ByRef $aStrings [, $dRowFrom = 1 [, $dRowTo = Default [, $dColFrom = 1 [, $dColTo = Default]]]])
 ; Parameters ....: $sFile      - path-string of the worksheet-xml
 ;                  $aStrings   - array with shared strings (return value of __xlsx_readSharedStrings)
 ;                  $dRowFrom   - row number (1-based) where to start the extraction
@@ -242,143 +246,185 @@ EndFunc   ;==>_xlsx_2Array
 ;                  $dColTo     - column number (1-based) where to stop the extraction
 ; Return values .: Success - Return 2D-Array with the worksheet content
 ;                  Failure - Return False and set @error to:
-;        				@error = 1 - cannot create XMLDOM-Object
-;                              = 2 - cannot open worksheet file
-;                              = 3 - cannot extract cell objects out of the xml-structure
-;                              = 4 - cannot determine worksheet dimensions
-;                              = 5 - wrong string id in shared-string value
+;        				@error = 1 - cannot read worksheet file
+;                              = 2 - cannot find any <row>-elements
+;                              = 3 - wrong string id in shared-string value
 ; Author ........: AspirinJunkie
-; Last changed ..: 2023-01-26
+; Last changed ..: 2023-02-27
 ; =================================================================================================
-Func __xlsx_readCells(Const $sFile, ByRef $aStrings, Const $dRowFrom = 1, $dRowTo = Default, $dColFrom = 1, $dColTo = Default)
-	; TODO: currently only the variant with attribute "r" (cell coordinate) implemented. Instead of this it's possible to define the cells sequential without the "r"-attribute.
+Func __xlsx_readCells($sFilePath, ByRef $aStrings, Const $dRowFrom = 1, $dRowTo = Default, $dColFrom = 1, $dColTo = Default)
+	Local $sFileRaw = FileRead($sFilePath)
+	If @error Then Return SetError(1,@error, Null)
 
-	Local $oXML = __xlsx_getXMLObject()
+	; determine if xml-elements have a prefix
+	; if so, then change the regex-pattern
+	; it's no problem to use a universal pattern but due to performance reasons the distinction is better
+	If StringRegExp(StringLeft($sFileRaw, 1000), '<\w+:worksheet') Then
+		Local $patRows = '(?s)<(?>\w+:)?row(?|\s+\/>|(?>\s+([^>]*))?>\s*(.+?)\s*<\/(?>\w+:)?row)'
+		Local $patCells = '(?s)<(?>\w+:)?c\s*(?|\/>|([^>]*)>\s*(.*?)\s*<\/(?>\w+:)?c\b)'
+		Local $patValue = '(?s)<(?>\w+:)?v>\s*([^<]*?)\s*<\/(?>\w+:)?v'
+		Local $patText = '(?s)<(?>\w+:)?t>\s*([^<]*?)\s*<\/(?>\w+:)?t'
+		Local $patRichText = '(?s)<(?>\w+:)?r>\s*([^<]*?)\s*<\/(?>\w+:)?r'
+	Else
+		Local $patRows = '(?s)<row(?|\s+\/>|(?>\s+([^>]*))?>\s*(.+?)\s*<\/row)'
+		Local $patCells = '(?s)<c\s*(?|\/>|([^>]*)>\s*(.*?)\s*<\/c\b)'
+		Local $patValue = '(?s)<v>\s*([^<]*?)\s*<\/v'
+		Local $patText = '(?s)<t>\s*([^<]*?)\s*<\/t'
+		Local $patRichText = '(?s)<r>\s*([^<]*?)\s*<\/r'
+	EndIf
 
-	If Not $oXML.load($sFile) Then Return SetError(2, 0, False)
+	; read rows first:
+	Local $aRows = StringRegExp($sFileRaw, $patRows, 4, 3)
+	If @error Then Return SetError(2, @error, Null)
 
-	; determine the namespace prefix:
-	Local $sPre = $oXML.documentElement.prefix
-	If $sPre <> "" Then $sPre &= ":"
+	; pre-dimension the return array
+	Local $aReturn[(IsInt($dRowTo) ? $dRowTo - $dRowFrom + 1 : Ubound($aRows) - $dRowFrom + 1)][(IsInt($dColTo) ? $dColTo - $dColFrom + 1 : 1)]
 
-	If IsObj($oXML.selectSingleNode('//' & $sPre & 'row/' & $sPre & 'c[@r]')) Then
-		; variant with cell-coordinate attribute @r
+	; iterate over rows:
+	Local $aRETmp, $aRowCol
+	Local $iRowCount = 0, $iRow, $iRowMax = 0, $iColMax = 0
+	For $aRow In $aRows
 
-		; select the cell-nodes (but only if they have a value-child)
-		Local $oCells = $oXML.selectNodes('/' & $sPre & 'worksheet/' & $sPre & 'sheetData/' & $sPre & 'row/' & $sPre & 'c[' & $sPre & 'v]')
-		If Not IsObj($oCells) Then Return SetError(3, 0, False)
+		; empty row element: <row />
+		If UBound($aRow) < 2 Then
+			$iRowCount += 1
+			ContinueLoop
+		EndIf
 
-		; determine dimensions:
-		Local $dColumnMax = 1, $dRowMax = 1, $sR, $aCoords
-		For $oCell In $oCells
-			$sR = $oCell.GetAttribute("r")
-			$aCoords = __xlsx_CellstringToRowColumn($sR)
-			$oCell.SetAttribute("row", $aCoords[1])
-			$oCell.SetAttribute("column", $aCoords[0] - 1)
-			If $aCoords[0] > $dColumnMax Then $dColumnMax = $aCoords[0]
-			If $aCoords[1] > $dRowMax Then $dRowMax = $aCoords[1]
-		Next
+		If $aRow[1] <> "" Then ; row attributes
+			; row number as xml-attribute of <row>
+			$aRETmp = StringRegExp($aRow[1], '\br="(.*?)"', 3)
+			If Not @error Then $iRow = Int($aRETmp[0]) - 1
+		Else
+			$iRow = $iRowCount
+		EndIf
 
-		; create output array
-		If $dRowTo <> Default Then $dRowMax = $dRowTo > $dRowMax ? $dRowMax : $dRowTo
-		If $dColTo <> Default Then $dColumnMax = $dColTo > $dColumnMax ? $dColumnMax : $dColTo
-		Local $aRet[$dRowMax - $dRowFrom + 1][$dColumnMax - $dColFrom + 1]
+		; row range check:
+		If $iRow < ($dRowFrom - 1) Then
+			$iRowCount += 1
+			ContinueLoop
+		EndIf
+		If IsInt($dRowTo) And $iRow >= $dRowTo Then ContinueLoop
 
-		; read cell values
-		Local $i = 0, $sTmp
-		For $oCell In $oCells
-			$i += 1
+		; read the cells of the row
+		Local $aCells = StringRegExp($aRow[2], $patCells, 4)
+		If @error Then
+			$iRowCount += 1
+			ContinueLoop ; skip if empty
+		EndIf
 
-			; check user defined boundaries for row and column
-			Local $dRow = $oCell.GetAttribute("row")
-			If $dRow < $dRowFrom Or $dRow > $dRowMax Then ContinueLoop
-			Local $dCol = $oCell.GetAttribute("column")
-			If $dCol < $dColFrom Or $dCol > $dColumnMax Then ContinueLoop
+		; redim output array if number of cols is bigger
+		If (IsKeyword($dColTo) = 1) And UBound($aCells) > UBound($aReturn, 2) Then Redim $aReturn[UBound($aReturn)][UBound($aCells) - $dColFrom + 1]
 
-			Switch $oCell.GetAttribute("t")
+		; iterate over cells of this row:
+		Local $iColCount = 0, $iCol
+		For $aCell in $aCells
+
+			If UBound($aCell) < 3 Then
+				$iColCount += 1
+				ContinueLoop
+			EndIf
+			Local $sType = ""
+
+			If $aCell[1] <> "" Then ; cell attributes
+				$aRETmp = StringRegExp($aCell[1], '\bt="(.*?)"', 3)
+				If Not @error Then $sType = $aRETmp[0]
+
+				; check if cell has a cell coordinate attribute
+				$aRETmp = StringRegExp($aCell[1], '\br="(.*?)"', 3)
+				If @error Then
+					$iCol = $iColCount
+					If IsInt($dColTo) And $iCol >= $dColTo Then
+						$iRowCount += 1
+						ContinueLoop 2
+					EndIf
+				Else ; it has a cell coordinate attribute
+					$aRowCol = __xlsx_CellstringToRowColumn($aRETmp[0])
+					$iCol = $aRowCol[0] - 1
+
+					; column range check
+					If $iCol < ($dColFrom - 1) Then
+						$iColCount += 1
+						ContinueLoop
+					EndIf
+					If IsInt($dColTo) And $iCol >= $dColTo Then ContinueLoop
+
+					; add colums to output array if cell has bigger column coordinate (possible if coordinate attribute is used)
+					If ($iCol - $dColFrom + 1) >= UBound($aReturn, 2) Then Redim $aReturn[UBound($aReturn, 1)][$iCol - $dColFrom + 2]
+
+					$iRow = $aRowCol[1] - 1
+					If $iRow < ($dRowFrom - 1) Then ContinueLoop
+
+					; add rows to output array if cell has bigger row coordinate (possible if coordinate attribute is used)
+					If ($iRow - $dRowFrom + 1) > UBound($aReturn, 1) Then Redim $aReturn[$iRow - $dRowFrom + 1][UBound($aReturn, 2)]
+				EndIf
+			Else
+				$iCol = $iColCount
+
+				; skip rest of current row complete if column is bigger then the user wants
+				If IsInt($dColTo) And $iCol >= $dColTo Then
+					$iRowCount += 1
+					ContinueLoop 2
+				EndIf
+			EndIf
+
+			; column range check
+			If $iCol < ($dColFrom - 1) Then
+				$iColCount += 1
+				ContinueLoop
+			EndIf
+
+			; treat according to cell type
+			$aRETmp = StringRegExp($aCell[2], $patValue, 3)
+			Local $sValue = @error ? "" : $aRETmp[0]
+			Switch $sType
 				Case "s" ; value = shared string-id
-					$sTmp = Int(__xmlSingleText($oCell, $sPre & 'v'))
-					If $sTmp > UBound($aStrings) Then Return SetError(5, $sTmp, False)
-					$sValue = $aStrings[$sTmp]
+					$sValue = Int($sValue)
+					If $sValue > UBound($aStrings) Then Return SetError(3, $sValue, False)
+					$sValue = $aStrings[$sValue]
 				Case "inlineStr" ; inline string
-					; Wert steht hier nicht in <v> sondern in einem <is></is> wo hierin wiederrum der selbe Aufbau herrscht wie in einem <si>-Element der sharedStrings.xml Also steht der Wert entweder in <t></t> bei normalem Text oder in <r></r> bei rich text.
+					; The value is not in <v> but in <is></is> where the structure is the same as in a <si> element of sharedStrings.xml So the value is either in <t></t> for normal text or in <r></r> for rich text
+					$aRETmp = StringRegExp($aCell[2], '<t>\K[^<]*', 3)
+					If @error Then ContinueLoop
+					If UBound($aRETmp) = 1 Then ; single line value
+						$sValue = $aRETmp[0]
+					Else ; multiline value
+						For $j = 0 To UBound($aRETmp) - 1
+							$sValue &= $aRETmp[$j] & @CRLF
+						Next
+						$sValue = StringTrimRight($sValue, 2)
+					EndIf
 				Case "str" ; formula
-					; hier steht die Formel selbst in einem [optionalem] <f></f> während der letzte berechnete Wert normal in <v></v> steht.
-					$sValue = __xmlSingleText($oCell, $sPre & 'v')
+					; here the formula itself is in an [optional] <f></f> while the last calculated value is normally in <v></v> - so nothing to do because $sValue has already value of <v>...</v>
 				Case "n" ; number (integers, floats, dates, times)
 					$sValue = Number($sValue)
 				; Case "e" ; error
 				Case "b" ; boolean
 					$sValue = $sValue = True
 				Case Else ; normal value
-					$sValue = __xmlSingleText($oCell, $sPre & 'v')
 					If StringRegExp($sValue, '(?i)\A(?|0x\d+|[-+]?(?>\d+)(?>\.\d+)?(?:e[-+]?\d+)?)\Z') Then $sValue = Number($sValue) ; if number then convert to number type
 			EndSwitch
-			$aRet[$oCell.GetAttribute("row") - $dRowFrom][$oCell.GetAttribute("column") - $dColFrom] = $sValue
-		Next
 
-	Else
-		; variant without cell coordinate attribute
-		Local $oVal, $oRows, $oCols
-		$oRows = $oXML.selectNodes('/' & $sPre & 'worksheet/' & $sPre & 'sheetData/' & $sPre & 'row')
-		$oCols = $oXML.selectNodes('/' & $sPre & 'worksheet/' & $sPre & 'sheetData/' & $sPre & 'row[0]/c')
-		;  Local $aRet[$oRows.length][IsKeyword($dColTo) = 1 ? $oCols.length : $dColTo - $dColFrom + 1], $iR = 0, $iC, $oV, $sValue
-		Local $aRet[$oRows.length][(IsKeyword($dColTo) = 1 ? $oCols.length - $dColFrom + 1 : $dColTo - $dColFrom + 1)], $iR = 0, $iC, $oV, $sValue
-
-		For $oRow In $oXML.selectNodes('/' & $sPre & 'worksheet/' & $sPre & 'sheetData/' & $sPre & 'row')
-			$iR += 1
-
-			If $iR < $dRowFrom Then ContinueLoop
-			If $iR > $dRowTo Then
-				$iR -= 1
-				ExitLoop
+			; determine empty rows and columns
+			If $sValue <> "" Then
+				If $iRow > $iRowMax Then $iRowMax = $iRow
+				If $iCol > $iColMax Then $iColMax = $iCol
 			EndIf
 
-			$iC = 0
-			For $oCell In $oRow.selectNodes('./' & $sPre & 'c')
-				$iC += 1
-				If $iC < $dColFrom Then ContinueLoop
-				If $iC > $dColTo Then
-					$iC -= 1
-					ExitLoop
-				EndIf
+			; handle value
+			$aReturn[$iRow - $dRowFrom + 1][$iCol - $dColFrom + 1] = $sValue
 
-				$oV = $oCell.selectSingleNode('./' & $sPre & 'v | ./' & $sPre & 'is')
-				If IsObj($oV) Then
-					$sValue = $oV.text()
-
-					Switch $oCell.GetAttribute("t")
-						Case "s" ; value = shared string-id
-							$sTmp = Int($sValue)
-							If $sTmp > UBound($aStrings) Then Return SetError(5, $sTmp, False)
-							$sValue = $aStrings[$sTmp]
-						Case "inlineStr" ; inline string
-							$sValue = __xmlSingleText($oCell, './' & $sPre & 'is/' & $sPre & 't | ./' & $sPre & 'is/' & $sPre & 'r')
-						Case "str" ; formula
-							; hier steht die Formel selbst in einem [optionalem] <f></f> während der letzte berechnete Wert normal in <v></v> steht.
-							$sValue = __xmlSingleText($oCell, $sPre & 'v')
-						; Case "e" ; error
-						Case "n"  ; number (integers, floats, dates, times)
-							$sValue = Number($sValue)
-						Case "b" ; boolean
-							$sValue = $sValue = True
-						Case Else ; normal value
-							$sValue = __xmlSingleText($oCell, $sPre & 'v')
-							If StringRegExp($sValue, '(?i)\A(?|0x\d+|[-+]?(?>\d+)(?>\.\d+)?(?:e[-+]?\d+)?)\Z') Then $sValue = Number($sValue) ; if number then convert to number type
-					EndSwitch
-
-					If UBound($aRet, 2) < $iC - $dColFrom + 1 Then ReDim $aRet[Ubound($aRet)][$iC - $dColFrom + 1]
-
-					$aRet[$iR-$dRowFrom][$iC- $dColFrom] = $sValue
-				EndIf
-			Next
+			$iColCount += 1
 		Next
-		Redim $aRet[$iR - $dRowFrom + 1][$iC - $dColFrom + 1]
 
-	EndIf
+		$iRowCount += 1
+	Next
 
-	Return $aRet
-EndFunc   ;==>__xlsx_readCells
+	; cut off empty rows
+	If UBound($aReturn, 1) > ($iRowMax - $dRowFrom + 2) Then Redim $aReturn[$iRowMax - $dRowFrom + 2][UBound($aReturn, 2)]
+
+	Return $aReturn
+EndFunc
 
 
 ; #FUNCTION# ======================================================================================
@@ -468,27 +514,33 @@ EndFunc   ;==>__xlsx_getSubFiles
 ; Parameters ....: $sFile      - path-string of the shared-string-xml
 ; Return values .: Success - Return 2D-Array with the worksheet content
 ;                  Failure - Return False and set @error to:
-;        				@error = 1 - cannot create XMLDOM-Object
-;                              = 2 - cannot open worksheet file
-;                              = 3 - cannot extract shared string objects out of the xml-structure
+;        				@error = 1 - error reading $sFile
+;                              = 2 - no <si>-elements found = no shared strings
 ; Author ........: AspirinJunkie
-; Last changed ..: 2020-07-27
+; Last changed ..: 2023-02-27
 ; =================================================================================================
 Func __xlsx_readSharedStrings(Const $sFile)
-	Local $oXML = __xlsx_getXMLObject()
+	Local $sFileRaw = FileRead($sFile)
+	IF @error THen Return SetError(1, @error, Null)
 
-	If Not $oXML.load($sFile) Then Return SetError(2, 0, False)
+	Local $aSI = StringRegExp($sFileRaw, '(?s)<si>(.+?)<\/si>', 3)
+	If @error THen Return SetError(2, @error, Null)
 
-	Local $sPre = $oXML.documentElement.prefix
-	If $sPre <> "" Then $sPre &= ":"
+	; dimension output array
+	Local $aRet[UBound($aSI)]
 
-	Local $oStrings = $oXML.selectNodes('/' & $sPre & 'sst/' & $sPre & 'si')
-	If Not IsObj($oStrings) Then Return SetError(3, 0, False)
-	Local $aRet[$oStrings.length], $i = 0
-
-	For $oText In $oStrings
-		$aRet[$i] = $oText.text
-		$i += 1
+	Local $aText
+	For $i = 0 To UBound($aSI) - 1
+		$aText = StringRegExp($aSI[$i], '<t>\K[^<]*', 3)
+		If @error Then ContinueLoop
+		If UBound($aText) = 1 Then
+			$aRet[$i] = $aText[0]
+		Else
+			For $j = 0 To UBound($aText) - 1
+				$aRet[$i] &= $aText[$j] & @CRLF
+			Next
+			$aRet[$i] = StringTrimRight($aRet[$i], 2)
+		EndIf
 	Next
 
 	Return $aRet
@@ -496,16 +548,13 @@ EndFunc   ;==>__xlsx_readSharedStrings
 
 ; converts excel formatted cell coordinate to array [column, row]
 Func __xlsx_CellstringToRowColumn($sID)
-	Local $aSplit = StringRegExp($sID, '^([A-Z]+)(\d+)$', 1)
+	Local $aSplit = StringRegExp($sID, "^([A-Z]+)(\d+)$", 1)
 	If @error Then Return SetError(1, @error, False)
-
-	Local $aChars = StringSplit($aSplit[0], '', 3)
-	Local $j, $dV, $aRet[2] = [0, Int($aSplit[1])]
-
-	For $i = 0 To UBound($aChars) - 1
-		$j = UBound($aChars) - $i - 1
-		$aRet[0] += (Asc($aChars[$i]) - 64) * (26 ^ $j)
+	Local $iCol = 0
+	For $i = 1 To StringLen($aSplit[0])
+		$iCol = $iCol * 26 + Asc(StringMid($aSplit[0], $i, 1)) - 64
 	Next
+	Local $aRet = [$iCol, Int($aSplit[1])]
 	Return $aRet
 EndFunc   ;==>__xlsx_CellstringToRowColumn
 
