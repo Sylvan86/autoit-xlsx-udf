@@ -261,13 +261,13 @@ Func __xlsx_readCells($sFilePath, ByRef $aStrings, Const $dRowFrom = 1, $dRowTo 
 	; it's no problem to use a universal pattern but due to performance reasons the distinction is better
 	If StringRegExp(StringLeft($sFileRaw, 1000), '<\w+:worksheet') Then
 		Local $patRows = '(?s)<(?>\w+:)?row(?|\s+\/>|(?>\s+([^>]*))?>\s*(.+?)\s*<\/(?>\w+:)?row)'
-		Local $patCells = '(?s)<(?>\w+:)?c\s*(?|\/>|([^>]*)>\s*(.*?)\s*<\/(?>\w+:)?c\b)'
+		Local $patCells = '(?s)<(?>\w+:)?c\s*(?|([^>]*)\/>|([^>]*)>\s*(.*?)\s*<\/(?>\w+:)?c\b)'
 		Local $patValue = '(?s)<(?>\w+:)?v>\s*([^<]*?)\s*<\/(?>\w+:)?v'
 		Local $patText = '(?s)<(?>\w+:)?t>\s*([^<]*?)\s*<\/(?>\w+:)?t'
 		Local $patRichText = '(?s)<(?>\w+:)?r>\s*([^<]*?)\s*<\/(?>\w+:)?r'
 	Else
 		Local $patRows = '(?s)<row(?|\s+\/>|(?>\s+([^>]*))?>\s*(.+?)\s*<\/row)'
-		Local $patCells = '(?s)<c\s*(?|\/>|([^>]*)>\s*(.*?)\s*<\/c\b)'
+		Local $patCells = '(?s)<c\s*(?|([^>]*)\/>|([^>]*)>\s*(.*?)\s*<\/c\b)'
 		Local $patValue = '(?s)<v>\s*([^<]*?)\s*<\/v'
 		Local $patText = '(?s)<t>\s*([^<]*?)\s*<\/t'
 		Local $patRichText = '(?s)<r>\s*([^<]*?)\s*<\/r'
@@ -704,7 +704,15 @@ Func __xlsx_zip($sInput, $sOutput)
 	Return 1
 EndFunc   ;==>__xlsx_zip
 
-; escape special xml characters
+
+; #INTERNAL_USE_ONLY# ===========================================================================================================
+; Name ..........: __xlsx_escape4xml
+; Description ...: escape special xml characters
+; Syntax ........: __xlsx_escape4xml($sString)
+; Parameters ....: $sString             - string with unescaped xml special chars
+; Return values .: the string with escaped special chars
+; Author ........: AspirinJunkie
+; ===============================================================================================================================
 Func __xlsx_escape4xml($sString)
 	$sString = StringReplace($sString, '&', '&amp;', 0, 1)
 	$sString = StringReplace($sString, '"', '&quot;', 0, 1)
