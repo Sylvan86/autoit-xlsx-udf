@@ -3,8 +3,8 @@
 
 ; #INDEX# =======================================================================================================================
 ; Title .........: xlsxNative
-; Version .......: 0.7
-; AutoIt Version : 3.3.14.5
+; Version .......: 0.7.1
+; AutoIt Version : 3.3.16.1
 ; Language ......: English
 ; Description ...: Functions to read/write data from/to Excel-xlsx files without the need of having excel installed
 ; Author(s) .....: AspirinJunkie
@@ -250,7 +250,7 @@ EndFunc   ;==>_xlsx_2Array
 ;                              = 2 - cannot find any <row>-elements
 ;                              = 3 - wrong string id in shared-string value
 ; Author ........: AspirinJunkie
-; Last changed ..: 2023-02-27
+; Last changed ..: 2023-03-13
 ; =================================================================================================
 Func __xlsx_readCells($sFilePath, ByRef $aStrings, Const $dRowFrom = 1, $dRowTo = Default, $dColFrom = 1, $dColTo = Default)
 	Local $sFileRaw = FileRead($sFilePath)
