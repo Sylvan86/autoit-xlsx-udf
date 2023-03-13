@@ -531,7 +531,7 @@ Func __xlsx_readSharedStrings(Const $sFile)
 
 	Local $aText
 	For $i = 0 To UBound($aSI) - 1
-		$aText = StringRegExp($aSI[$i], '<t>\K[^<]*', 3)
+		$aText = StringRegExp($aSI[$i], '<t[^>]*>\K[^<]*', 3)
 		If @error Then ContinueLoop
 		If UBound($aText) = 1 Then
 			$aRet[$i] = $aText[0]
