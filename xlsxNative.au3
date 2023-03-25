@@ -356,7 +356,7 @@ Func __xlsx_readCells($sFilePath, ByRef $aStrings, Const $dRowFrom = 1, $dRowTo 
 					If $iRow < ($dRowFrom - 1) Then ContinueLoop
 
 					; add rows to output array if cell has bigger row coordinate (possible if coordinate attribute is used)
-					If ($iRow - $dRowFrom + 1) > UBound($aReturn, 1) Then Redim $aReturn[$iRow - $dRowFrom + 1][UBound($aReturn, 2)]
+					If ($iRow - $dRowFrom + 1) >= UBound($aReturn, 1) Then Redim $aReturn[$iRow - $dRowFrom + 2][UBound($aReturn, 2)]
 				EndIf
 			Else
 				$iCol = $iColCount
