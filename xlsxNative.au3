@@ -521,9 +521,9 @@ EndFunc   ;==>__xlsx_getSubFiles
 ; =================================================================================================
 Func __xlsx_readSharedStrings(Const $sFile)
 	Local $sFileRaw = FileRead($sFile)
-	IF @error THen Return SetError(1, @error, Null)
+	If @error THen Return SetError(1, @error, Null)
 
-	Local $aSI = StringRegExp($sFileRaw, '(?s)<si>(.+?)<\/si>', 3)
+	Local $aSI = StringRegExp($sFileRaw, '(?s)<(?>\w:)?si>(.+?)<\/(?>\w:)?si>', 3)
 	If @error THen Return SetError(2, @error, Null)
 
 	; dimension output array
@@ -531,7 +531,7 @@ Func __xlsx_readSharedStrings(Const $sFile)
 
 	Local $aText
 	For $i = 0 To UBound($aSI) - 1
-		$aText = StringRegExp($aSI[$i], '<t[^>]*>\K[^<]*', 3)
+		$aText = StringRegExp($aSI[$i], '<(?>\w:)?t[^>]*>\K[^<]*', 3)
 		If @error Then ContinueLoop
 		If UBound($aText) = 1 Then
 			$aRet[$i] = $aText[0]
