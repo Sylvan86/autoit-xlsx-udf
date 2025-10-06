@@ -167,8 +167,18 @@ Func _xlsx_WriteFromArray(Const $sFile, ByRef $aArray)
 						$sSheet &= '<c t="n"><v>' & String($aA[$r][$c]) & '</v></c>'
 					Case "Bool"
 						$sSheet &= '<c t="b"><v>' & Int($aA[$r][$c]) & '</v></c>'
-					Case Else ; especially a string
-						$sSheet &= '<c t="inlineStr"><is><t>' & __xlsx_escape4xml($aA[$r][$c]) & '</t></is></c>'
+					Case Else ; especially a string or a function
+						Switch StringLeft($aA[$r][$c], 1) ; a function string
+							Case "="
+								If StringMid($aA[$r][$c], 2, 1) = "=" Then ; escape leading "=" through doubling
+									$aA[$r][$c] = StringTrimLeft($aA[$r][$c], 1)
+									ContinueCase ; handle as normal string
+								Else
+									$sSheet &= '<c><f>' & __xlsx_escape4xml(StringTrimLeft($aA[$r][$c], 1)) & '</f></c>'
+								EndIf
+							Case Else ; a normal string
+								$sSheet &= '<c t="inlineStr"><is><t>' & __xlsx_escape4xml($aA[$r][$c]) & '</t></is></c>'
+						EndSwitch
 				EndSwitch
 			EndIf
 		Next
