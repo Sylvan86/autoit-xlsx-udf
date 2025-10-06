@@ -130,31 +130,31 @@ Func _xlsx_WriteFromArray(Const $sFile, ByRef $aArray)
 	; [Content_Types].xml
 	$dSuccess = DirCreate($pthWorkDir)
 	If $dSuccess = 0 Then Return SetError(2, 1, False)
-	$dSuccess = FileWrite($pthWorkDir & '[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="bin" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.printerSettings" /><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml" /><Default Extension="xml" ContentType="application/xml" /><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml" /><Override PartName="/xl/worksheets/sheet.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml" /></Types>')
+	$dSuccess = FileWrite($pthWorkDir & '[Content_Types].xml', '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml" /><Override PartName="/xl/w.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml" /><Override PartName="/xl/w/s.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml" /></Types>')
 	If $dSuccess = 0 Then Return SetError(3, 1, False)
 
 	; .rels
 	$dSuccess = DirCreate($pthWorkDir & '_rels')
 	If $dSuccess = 0 Then Return SetError(2, 2, False)
-	$dSuccess = FileWrite($pthWorkDir & '_rels\.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>')
+	$dSuccess = FileWrite($pthWorkDir & '_rels\.rels', '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/w.xml"/></Relationships>')
 	If $dSuccess = 0 Then Return SetError(3, 2, False)
 
 	; workbook.xml
 	$dSuccess = DirCreate($pthWorkDir & 'xl')
 	If $dSuccess = 0 Then Return SetError(2, 3, False)
-	$dSuccess = FileWrite($pthWorkDir & 'xl\workbook.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="1" sheetId="1" r:id="rId1" /></sheets></workbook>')
+	$dSuccess = FileWrite($pthWorkDir & 'xl\w.xml', '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="1" sheetId="1" r:id="rId1" /></sheets></workbook>')
 	If $dSuccess = 0 Then Return SetError(3, 3, False)
 
 	; workbook.xml.rels
 	$dSuccess = DirCreate($pthWorkDir & 'xl\_rels')
 	If $dSuccess = 0 Then Return SetError(2, 4, False)
-	$dSuccess = FileWrite($pthWorkDir & 'xl\_rels\workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet.xml"/></Relationships>')
+	$dSuccess = FileWrite($pthWorkDir & 'xl\_rels\w.xml.rels', '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="w/s.xml"/></Relationships>')
 	If $dSuccess = 0 Then Return SetError(3, 4, False)
 
 	; sheet.xml
-	$dSuccess = DirCreate($pthWorkDir & 'xl\worksheets')
+	$dSuccess = DirCreate($pthWorkDir & 'xl\w')
 	If $dSuccess = 0 Then Return SetError(2, 5, False)
-	Local $sSheet = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetData>'
+	Local $sSheet = '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'
 	For $r = 0 To UBound($aA) - 1
 		$sSheet &= '<row>'
 		For $c = 0 To UBound($aA, 2) - 1
@@ -163,8 +163,8 @@ Func _xlsx_WriteFromArray(Const $sFile, ByRef $aArray)
 				$sSheet &= '<c />'
 			Else
 				Switch VarGetType($aA[$r][$c])
-					Case "Double", "Float", "Int32", "Int64" ; a number
-						$sSheet &= '<c t="n"><v>' & String($aA[$r][$c]) & '</v></c>'
+					Case "Double", "Float", "Int32", "Int64" ; a number (t="n" is default so to save space leave it)
+						$sSheet &= '<c><v>' & String($aA[$r][$c]) & '</v></c>'
 					Case "Bool"
 						$sSheet &= '<c t="b"><v>' & Int($aA[$r][$c]) & '</v></c>'
 					Case Else ; especially a string or a function
@@ -185,7 +185,7 @@ Func _xlsx_WriteFromArray(Const $sFile, ByRef $aArray)
 		$sSheet &= '</row>'
 	Next
 	$sSheet &= '</sheetData></worksheet>'
-	$dSuccess = FileWrite($pthWorkDir & 'xl\worksheets\sheet.xml', $sSheet)
+	$dSuccess = FileWrite($pthWorkDir & 'xl\w\s.xml', $sSheet)
 	If $dSuccess = 0 Then Return SetError(3, 5, False)
 
 	; zip to xlsx
@@ -702,8 +702,7 @@ Func __xlsx_zip($sInput, $sOutput)
 	;  If Not @error And $iExitCode = 0 Then
 
 	; "jar -cMf targetArchive.zip sourceDirectory"
-
-	$iExitCode = RunWait(StringFormat('7za.exe a -mm=Deflate -mfb=258 -mpass=15 -r "%s" "%s"', $sOutput, $sInput), "", @SW_HIDE)
+	$iExitCode = RunWait(StringFormat('7za.exe a -tzip -mm=Deflate -mx=9 -mfb=258 -mpass=15 -mtc=off -mtm=off -mta=off "%s" "%s"', $sOutput, $sInput), "", @SW_HIDE)
 	If @error Or $iExitCode <> 0 Then
 
 		$iExitCode = RunWait(StringFormat('powershell.exe -Command "Compress-Archive ''%s'' ''%s''"', $sInput, $sOutput & ".zip"), "", @SW_HIDE)
