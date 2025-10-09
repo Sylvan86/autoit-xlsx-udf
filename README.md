@@ -24,3 +24,5 @@ _xlsx_WriteFromArray(@ScriptDir & "\Text.xlsx", $A)
 $aSheet = _xlsx_2Array(@ScriptDir & "\Text.xlsx")
 _ArrayDisplay($aSheet, "imported data from xlsx")
 ```
+
+The UDF is primarily documented via the function headers.

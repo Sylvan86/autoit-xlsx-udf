@@ -4,12 +4,12 @@
 
 ; #INDEX# =======================================================================================================================
 ; Title .........: xlsxNative
-; Version .......: 0.7.1
-; AutoIt Version : 3.3.16.1
+; Version .......: 0.8.0
+; AutoIt Version : 3.3.18.0
 ; Language ......: English
 ; Description ...: Functions to read/write data from/to Excel-xlsx files without the need of having excel installed
 ; Author(s) .....: AspirinJunkie
-; Last changed ..: 2023-01-26
+; Last changed ..: 2025-10-09
 ; License .......: This work is free.
 ;                  You can redistribute it and/or modify it under the terms of the Do What The Fuck You Want To Public License, Version 2,
 ;                  as published by Sam Hocevar.
