@@ -129,75 +129,98 @@ Func _xlsx_WriteFromArray(Const $sFile, ByRef $aArray)
 		Local $aA = $aArray
 	EndIf
 
+	; determine infos about the position of empty cells (helps to reduce file size)
+	Local $mArrayInfos = __xlsx_determineEmptyArrayElements($aA)
+	If @error Then Return SetError(5, @error, False)
+	Local $aLastIDs = $mArrayInfos.aLastIDs, $iFirstWrittenRow = $mArrayInfos.iFirstWrittenRow, $iLastWrittenRow = $mArrayInfos.iLastWrittenRow
+
 	; sheet.xml
 	$dSuccess = DirCreate($pthWorkDir & 'xl')
 	If $dSuccess = 0 Then Return SetError(2, 3, False)
 	$dSuccess = DirCreate($pthWorkDir & 'xl\w')
 	If $dSuccess = 0 Then Return SetError(2, 5, False)
 	Local $sSheet = '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'
-	For $r = 0 To UBound($aA) - 1
-		$sSheet &= '<row>'
-		For $c = 0 To UBound($aA, 2) - 1
+	Local $iLastNonEmptyRow = -1, $iLastNonEmptyCol, $sCellElemString
+	For $r = $iFirstWrittenRow To $iLastWrittenRow
+
+		; don't process empty lines
+		If $aLastIDs[$r] = 0 Then ContinueLoop
+
+		; if there have been empty lines before - use the "r" attribute
+		If $iLastNonEmptyRow = $r - 1 Then
+			$sSheet &= '<row>'
+		Else
+			$sSheet &= '<row r="' & $r + 1 & '">'
+		EndIf
+
+		; variable to determine that this line was not empty
+		$iLastNonEmptyRow = $r
+		$iLastNonEmptyCol = -1 ; reset
+
+		For $c = 0 To $aLastIDs[$r] - 1
 			$vVal = $aA[$r][$c]
 
-			; empty cell:
-			If $vVal = "" Then
-				$sSheet &= '<c />'
-			Else
-				Switch VarGetType($vVal)
-					Case "Double", "Float", "Int32", "Int64" ; a number (t="n" is default so to save space leave it)
-						$sSheet &= '<c><v>' & String($vVal) & '</v></c>'
+			; empty or NULL cell:
+			If $vVal = "" Or (IsKeyword($vVal) = 2) Then ContinueLoop
 
-					Case "Bool"
-						$sSheet &= '<c t="b"><v>' & Int($vVal) & '</v></c>'
+			; handle empty cells before the current cell
+			$sCellElemString = ($iLastNonEmptyCol = $c - 1) ? "c" : 'c r="' & __xlsx_createCellString($r+1, $c+1) & '"'
+			$iLastNonEmptyCol = $c
+				
+			Switch VarGetType($vVal)
+				Case "Double", "Float", "Int32", "Int64" ; a number (t="n" is default so to save space leave it)
+					$sSheet &= '<' & $sCellElemString & '><v>' & String($vVal) & '</v></c>'
 
-					Case Else ; especially a string or a function
+				Case "Bool"
+					$sSheet &= '<' & $sCellElemString & ' t="b"><v>' & Int($vVal) & '</v></c>'
 
-						; maybe a function
-						If StringLeft($vVal, 1) = "=" Then
-							If StringMid($vVal, 2, 1) = "=" Then ; escape leading "=" through doubling --> handle as normal string value
-								$sSheet &= '<c t="inlineStr"><is><t>' & __xlsx_escape4xml(StringTrimLeft($vVal, 1)) & '</t></is></c>'
+				Case Else ; especially a string or a function
 
-							Else ; handle as Excel function value
-								$sSheet &= '<c><f>' & __xlsx_escape4xml(StringTrimLeft($vVal, 1)) & '</f></c>'
+					; maybe a function
+					If StringLeft($vVal, 1) = "=" Then
+						If StringMid($vVal, 2, 1) = "=" Then ; escape leading "=" through doubling --> handle as normal string value
+							$sSheet &= '<' & $sCellElemString & ' t="inlineStr"><is><t>' & __xlsx_escape4xml(StringTrimLeft($vVal, 1)) & '</t></is></c>'
+
+						Else ; handle as Excel function value
+							$sSheet &= '<' & $sCellElemString & '><f>' & __xlsx_escape4xml(StringTrimLeft($vVal, 1)) & '</f></c>'
+
+						EndIf
+
+						ContinueLoop
+					EndIf
+
+					; check if string contains a date/time
+					$aRE = StringRegExp($vVal, $patDATETIME, 3)
+					If @error Then 
+						$sSheet &= '<' & $sCellElemString & ' t="inlineStr"><is><t>' & __xlsx_escape4xml($vVal) & '</t></is></c>' ; normal string
+						ContinueLoop
+					EndIf
+
+					Switch UBound($aRE, 1)
+						Case 1 ; a date or time only
+							If StringLen($aRE[0]) < 6 Then ; time only
+								$sSheet &= StringFormat('<' & $sCellElemString & ' s="2"><v>%f</v></c>', StringLeft($vVal, 2) / 24.0 + StringMid($vVal, 4, 2) / 1440.0)
+
+							Else ; date value
+								$sSheet &= '<' & $sCellElemString & ' t="d" s="1"><v>' & $vVal & '</v></c>' ; date value
 
 							EndIf
+							$bDates = True
 
-							ContinueLoop
-						EndIf
+						Case 2 ; date + time 
+							$sSheet &= '<' & $sCellElemString & ' t="d" s="3"><v>' & $vVal & '</v></c>'
+							$bDates = True
 
-						; check if string contains a date/time
-						$aRE = StringRegExp($vVal, $patDATETIME, 3)
-						If @error Then 
-							$sSheet &= '<c t="inlineStr"><is><t>' & __xlsx_escape4xml($vVal) & '</t></is></c>' ; normal string
-							ContinueLoop
-						EndIf
-
-						Switch UBound($aRE, 1)
-							Case 1 ; a date or time only
-								If StringLen($aRE[0]) < 6 Then ; time only
-									$sSheet &= StringFormat('<c s="2"><v>%f</v></c>', StringLeft($vVal, 2) / 24.0 + StringMid($vVal, 4, 2) / 1440.0)
-
-								Else ; date value
-									$sSheet &= '<c t="d" s="1"><v>' & $vVal & '</v></c>' ; date value
-
-								EndIf
-								$bDates = True
-
-							Case 2 ; date + time 
-								$sSheet &= '<c t="d" s="3"><v>' & $vVal & '</v></c>'
-								$bDates = True
-
-						EndSwitch
-				EndSwitch
-			EndIf
+					EndSwitch
+			EndSwitch
 		Next
 		$sSheet &= '</row>'
 	Next
 	$sSheet &= '</sheetData></worksheet>'
+
 	$dSuccess = FileWrite($pthWorkDir & 'xl\w\s.xml', $sSheet)
 	If $dSuccess = 0 Then Return SetError(3, 5, False)
-
+	
 	; [Content_Types].xml
 	$dSuccess = DirCreate($pthWorkDir)
 	If $dSuccess = 0 Then Return SetError(2, 1, False)
@@ -334,12 +357,12 @@ Func __xlsx_readCells($sFilePath, ByRef $aStrings, Const $dRowFrom = 1, $dRowTo 
 
 	; iterate over rows:
 	Local $aRETmp, $aRowCol
-	Local $iRowCount = 0, $iRow, $iRowMax = 0, $iColMax = 0
+	Local $iRow = -1, $iRowMax = 0, $iCol, $iColMax = 0
 	For $aRow In $aRows
 
 		; empty row element: <row />
 		If UBound($aRow) < 2 Then
-			$iRowCount += 1
+			$iRow += 1
 			ContinueLoop
 		EndIf
 
@@ -348,32 +371,31 @@ Func __xlsx_readCells($sFilePath, ByRef $aStrings, Const $dRowFrom = 1, $dRowTo 
 			$aRETmp = StringRegExp($aRow[1], '\br="(.*?)"', 3)
 			If Not @error Then $iRow = Int($aRETmp[0]) - 1
 		Else
-			$iRow = $iRowCount
+			$iRow += 1
 		EndIf
 
-		; row range check:
-		If $iRow < ($dRowFrom - 1) Then
-			$iRowCount += 1
-			ContinueLoop
-		EndIf
+		; row range check (ignore rows outside the user specified range):
+		If $iRow < ($dRowFrom - 1) Then ContinueLoop
 		If IsInt($dRowTo) And $iRow >= $dRowTo Then ContinueLoop
+
+		; ReDim return array (needful if "r"-attribute is used in <row>)
+		If UBound($aReturn, 1) <= $iRow Then Redim $aReturn[$iRow + 1][UBound($aReturn, 2)]
 
 		; read the cells of the row
 		Local $aCells = StringRegExp($aRow[2], $patCells, 4)
-		If @error Then
-			$iRowCount += 1
-			ContinueLoop ; skip if empty
-		EndIf
+		If @error Then ContinueLoop ; skip if empty
 
 		; redim output array if number of cols is bigger
 		If (IsKeyword($dColTo) = 1) And UBound($aCells) > UBound($aReturn, 2) Then Redim $aReturn[UBound($aReturn)][UBound($aCells) - $dColFrom + 1]
 
+
 		; iterate over cells of this row:
-		Local $iColCount = 0, $iCol
+		$iColCount = 0
+		$iCol      = -1
 		For $aCell in $aCells
 
 			If UBound($aCell) < 3 Then
-				$iColCount += 1
+				$iCol += 1
 				ContinueLoop
 			EndIf
 			Local $sType = ""
@@ -384,47 +406,46 @@ Func __xlsx_readCells($sFilePath, ByRef $aStrings, Const $dRowFrom = 1, $dRowTo 
 
 				; check if cell has a cell coordinate attribute
 				$aRETmp = StringRegExp($aCell[1], '\br="(.*?)"', 3)
-				If @error Then
-					$iCol = $iColCount
-					If IsInt($dColTo) And $iCol >= $dColTo Then
-						$iRowCount += 1
-						ContinueLoop 2
-					EndIf
+				If @error Then ; no cell coordinate attribute
+					$iCol += 1
+					
+					; ignore columns outside the user specified range
+					If IsInt($dColTo) And $iCol >= $dColTo Then	ContinueLoop 2
+
 				Else ; it has a cell coordinate attribute
 					$aRowCol = __xlsx_CellstringToRowColumn($aRETmp[0])
 					$iCol = $aRowCol[0] - 1
 
-					; column range check
-					If $iCol < ($dColFrom - 1) Then
-						$iColCount += 1
-						ContinueLoop
-					EndIf
+					; ignore columns outside the user specified range
+					If $iCol < ($dColFrom - 1) Then ContinueLoop
 					If IsInt($dColTo) And $iCol >= $dColTo Then ContinueLoop
 
 					; add colums to output array if cell has bigger column coordinate (possible if coordinate attribute is used)
 					If ($iCol - $dColFrom + 1) >= UBound($aReturn, 2) Then Redim $aReturn[UBound($aReturn, 1)][$iCol - $dColFrom + 2]
 
-					$iRow = $aRowCol[1] - 1
-					If $iRow < ($dRowFrom - 1) Then ContinueLoop
+					; read the row of the cell (normally should be the same as the row itself)
+					If ($aRowCol[1] - 1) <> $iRow Then
+						$iRow = $aRowCol[1] - 1
+					
+						; row range check (ignore rows outside the user specified range):
+						If $iRow < ($dRowFrom - 1) Then ContinueLoop
+						If IsInt($dRowTo) And $iRow >= $dRowTo Then ContinueLoop
 
-					; add rows to output array if cell has bigger row coordinate (possible if coordinate attribute is used)
-					If ($iRow - $dRowFrom + 1) >= UBound($aReturn, 1) Then Redim $aReturn[$iRow - $dRowFrom + 2][UBound($aReturn, 2)]
+						; ReDim return array (needful if "r"-attribute is used in <row>)
+						If UBound($aReturn, 1) <= $iRow Then Redim $aReturn[$iRow + 1][UBound($aReturn, 2)]
+					EndIf
 				EndIf
-			Else
-				$iCol = $iColCount
 
+			Else ; no cell attributes 
+				$iCol += 1
+					
 				; skip rest of current row complete if column is bigger then the user wants
-				If IsInt($dColTo) And $iCol >= $dColTo Then
-					$iRowCount += 1
-					ContinueLoop 2
-				EndIf
+				If IsInt($dColTo) And $iCol >= $dColTo Then ContinueLoop 2
+
 			EndIf
 
 			; column range check
-			If $iCol < ($dColFrom - 1) Then
-				$iColCount += 1
-				ContinueLoop
-			EndIf
+			If $iCol < ($dColFrom - 1) Then ContinueLoop
 
 			; treat according to cell type
 			$aRETmp = StringRegExp($aCell[2], $patValue, 3)
@@ -434,6 +455,7 @@ Func __xlsx_readCells($sFilePath, ByRef $aStrings, Const $dRowFrom = 1, $dRowTo 
 					$sValue = Int($sValue)
 					If $sValue > UBound($aStrings) Then Return SetError(3, $sValue, False)
 					$sValue = $aStrings[$sValue]
+				
 				Case "inlineStr" ; inline string
 					; The value is not in <v> but in <is></is> where the structure is the same as in a <si> element of sharedStrings.xml So the value is either in <t></t> for normal text or in <r></r> for rich text
 					$aRETmp = StringRegExp($aCell[2], '<t>\K[^<]*', 3)
@@ -446,13 +468,17 @@ Func __xlsx_readCells($sFilePath, ByRef $aStrings, Const $dRowFrom = 1, $dRowTo 
 						Next
 						$sValue = StringTrimRight($sValue, 2)
 					EndIf
+				
 				Case "str" ; formula
 					; here the formula itself is in an [optional] <f></f> while the last calculated value is normally in <v></v> - so nothing to do because $sValue has already value of <v>...</v>
+				
 				Case "n" ; number (integers, floats, dates, times)
 					$sValue = Number($sValue)
+
 				; Case "e" ; error
 				Case "b" ; boolean
 					$sValue = $sValue = True
+
 				Case Else ; normal value
 					If StringRegExp($sValue, '(?i)\A(?|0x\d+|[-+]?(?>\d+)(?>\.\d+)?(?:e[-+]?\d+)?)\Z') Then $sValue = Number($sValue) ; if number then convert to number type
 			EndSwitch
@@ -463,13 +489,11 @@ Func __xlsx_readCells($sFilePath, ByRef $aStrings, Const $dRowFrom = 1, $dRowTo 
 				If $iCol > $iColMax Then $iColMax = $iCol
 			EndIf
 
-			; handle value
+			; add value to output array
 			$aReturn[$iRow - $dRowFrom + 1][$iCol - $dColFrom + 1] = $sValue
 
-			$iColCount += 1
 		Next
 
-		$iRowCount += 1
 	Next
 
 	; cut off empty rows
@@ -609,6 +633,24 @@ Func __xlsx_CellstringToRowColumn($sID)
 	Local $aRet = [$iCol, Int($aSplit[1])]
 	Return $aRet
 EndFunc   ;==>__xlsx_CellstringToRowColumn
+
+; convert row number and column number into Excel´s cell coordinate syntax
+; $iRow and $iCol are 1-based
+Func __xlsx_createCellString($iRow, $iCol)
+    If $iRow < 1 Then Return SetError(1, $iRow, 0)
+    If $iCol < 1 Then Return SetError(2, $iCol, 0)
+
+    Local $sRet = "", $iMod 
+
+    While $iCol > 0
+        $iCol -= 1   ; because it`s 1-based                          
+        $iMod  = Mod($iCol, 26)     
+        $sRet = Chr(65 + $iMod) & $sRet
+        $iCol = Int($iCol / 26)                 
+    WEnd
+
+    Return $sRet & $iRow 
+EndFunc
 
 
 ; #FUNCTION# ======================================================================================
@@ -778,6 +820,39 @@ Func __xmlSingleText(ByRef $oXML, Const $sXPath)
 	Local $oTmp = $oXML.selectSingleNode($sXPath)
 	Return IsObj($oTmp) ? $oTmp.text : SetError(1, 0, "")
 EndFunc   ;==>__xmlSingleText
+
+; determine the last written element column for every array row 
+; and the number of empty lines at the beginning 
+; and the last written line in the array 
+Func __xlsx_determineEmptyArrayElements(ByRef $aArray)
+    If UBound($aArray, 0) <> 2 Then Return SetError(1, UBound($aArray, 0), Null)
+
+    Local $iRows = UBound($aArray, 1), $iCols = UBound($aArray, 2), $aNumElements[$iRows]
+    Local $iC, $i, $j, $iEmptyPre = 0, $iLastDataRow = 0
+    For $i = 0 To $iRows -1
+        $iC = 0
+
+        ; go through current row and determine the column of the last element
+        For $j = 0 To $iCols - 1
+            If $aArray[$i][$j] <> "" And IsKeyword($aArray[$i][$j]) <> 2 Then $iC = $j + 1
+        Next
+
+        ; determine number of empty lines at the beginning
+        If $iC = 0 And $iEmptyPre = $i Then $iEmptyPre = $i + 1
+        
+        ; determine the last written row number
+        If $iC <> 0 Then $iLastDataRow = $i
+
+        $aNumElements[$i] = $iC
+    Next
+
+    Local $mRet[]
+    $mRet.aLastIDs = $aNumElements
+    $mRet.iFirstWrittenRow = $iEmptyPre
+    $mRet.iLastWrittenRow = $iLastDataRow
+
+    Return $mRet
+EndFunc
 
 #Region general helper functions
 
