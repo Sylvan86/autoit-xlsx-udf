@@ -39,7 +39,7 @@
 ; =================================================================================================
 Func _xlsx_2Array(Const $sFile, Const $iSheetNr = 1, $dRowFrom = 1, $dRowTo = Default, $dColFrom = 1, $dColTo = Default)
 	Local $pthWorkDir = @TempDir & "\xlsxWork\"
-	Local $aStrings[0]
+	Local $aStrings[0], $iErr
 
 	; correct wrong values for  $dRowFrom and $dRowTo
 	If $dRowFrom < 1 Or Not IsInt($dRowFrom) Then $dRowFrom = 1
@@ -58,15 +58,17 @@ Func _xlsx_2Array(Const $sFile, Const $iSheetNr = 1, $dRowFrom = 1, $dRowTo = De
 	; unpack xlsx-file
 	__xlsx_unzip($sFile, $pthWorkDir, "xl\*.xml _rels\.rels xl\_rels\*.rels")
 	If @error Then
+		$iErr = @error
 		DirRemove($pthWorkDir, 1)
-		Return SetError(3, @error, False)
+		Return SetError(3, $iErr, False)
 	EndIf
 
 	; determine file paths:
 	Local $mFiles = __xlsx_getSubFiles($pthWorkDir)
 	If @error Then
+		$iErr = @error
 		DirRemove($pthWorkDir, 1)
-		Return SetError(1, @error, False)
+		Return SetError(1, $iErr, False)
 	EndIf
 
 	; determine sheet file
