@@ -1,3 +1,4 @@
+#include-once
 #include <Date.au3>
 #include <Array.au3>
 
@@ -38,6 +39,7 @@
 ; =================================================================================================
 Func _xlsx_2Array(Const $sFile, Const $iSheetNr = 1, $dRowFrom = 1, $dRowTo = Default, $dColFrom = 1, $dColTo = Default)
 	Local $pthWorkDir = @TempDir & "\xlsxWork\"
+	Local $aStrings[0]
 
 	; correct wrong values for  $dRowFrom and $dRowTo
 	If $dRowFrom < 1 Or Not IsInt($dRowFrom) Then $dRowFrom = 1
@@ -80,10 +82,8 @@ Func _xlsx_2Array(Const $sFile, Const $iSheetNr = 1, $dRowFrom = 1, $dRowTo = De
 	EndIf
 
 	; read shared strings into an 1D-array
-	If (Not MapExists($mFiles, "SharedStringsFile")) Or (Not FileExists($mFiles["SharedStringsFile"])) Then
-		Local $aStrings[0]
-	Else
-		Local $aStrings = __xlsx_readSharedStrings($mFiles["SharedStringsFile"])
+	If (MapExists($mFiles, "SharedStringsFile")) And (FileExists($mFiles["SharedStringsFile"])) Then
+		$aStrings = __xlsx_readSharedStrings($mFiles["SharedStringsFile"])
 		If @error Then Local $aStrings[0]
 	EndIf
 
@@ -119,14 +119,15 @@ Func _xlsx_WriteFromArray(Const $sFile, ByRef $aArray)
 	Local $vVal, $bDates = False, $aRE
 
 	; convert 1D Array to 2D-Array if needed:
+	Local $aA[0]
 	If UBound($aArray, 0) = 1 Then
-		Local $aA[UBound($aArray)][1]
+		Redim $aA[UBound($aArray)][1]
 		For $i = 0 To UBound($aA) - 1
 			$aA[$i][0] = $aArray[$i]
 		Next
 	Else
 		If Not IsArray($aArray) Then Return SetError(1, 0, False)
-		Local $aA = $aArray
+		$aA = $aArray
 	EndIf
 
 	; determine infos about the position of empty cells (helps to reduce file size)
@@ -294,7 +295,7 @@ Func _xlsx_getWorkSheets(Const $sFile)
 		Return SetError(1, @error, Null)
 	EndIf
 
-	Local $mSheets = $mFiles["Worksheets"]
+	Local $mSheets = $mFiles["Worksheets"], $mSheet
 	Local $aRet[UBound($mSheets)][2]
 
 	For $i = 0 To UBound($aRet) - 1
@@ -334,18 +335,19 @@ Func __xlsx_readCells($sFilePath, ByRef $aStrings, Const $dRowFrom = 1, $dRowTo 
 	; determine if xml-elements have a prefix
 	; if so, then change the regex-pattern
 	; it's no problem to use a universal pattern but due to performance reasons the distinction is better
+	Local $patRows, $patCells, $patValue
 	If StringRegExp(StringLeft($sFileRaw, 1000), '<\w+:worksheet') Then
-		Local $patRows = '(?s)<(?>\w+:)?row(?|\s+\/>|(?>\s+([^>]*))?>\s*(.+?)\s*<\/(?>\w+:)?row)'
-		Local $patCells = '(?s)<(?>\w+:)?c\s*(?|([^>]*)\/>|([^>]*)>\s*(.*?)\s*<\/(?>\w+:)?c\b)'
-		Local $patValue = '(?s)<(?>\w+:)?v>\s*([^<]*?)\s*<\/(?>\w+:)?v'
-		Local $patText = '(?s)<(?>\w+:)?t>\s*([^<]*?)\s*<\/(?>\w+:)?t'
-		Local $patRichText = '(?s)<(?>\w+:)?r>\s*([^<]*?)\s*<\/(?>\w+:)?r'
+		$patRows = '(?s)<(?>\w+:)?row(?|\s+\/>|(?>\s+([^>]*))?>\s*(.+?)\s*<\/(?>\w+:)?row)'
+		$patCells = '(?s)<(?>\w+:)?c\s*(?|([^>]*)\/>|([^>]*)>\s*(.*?)\s*<\/(?>\w+:)?c\b)'
+		$patValue = '(?s)<(?>\w+:)?v>\s*([^<]*?)\s*<\/(?>\w+:)?v'
+		;~ $patText = '(?s)<(?>\w+:)?t>\s*([^<]*?)\s*<\/(?>\w+:)?t'
+		;~ $patRichText = '(?s)<(?>\w+:)?r>\s*([^<]*?)\s*<\/(?>\w+:)?r'
 	Else
-		Local $patRows = '(?s)<row(?|\s+\/>|(?>\s+([^>]*))?>\s*(.+?)\s*<\/row)'
-		Local $patCells = '(?s)<c\s*(?|([^>]*)\/>|([^>]*)>\s*(.*?)\s*<\/c\b)'
-		Local $patValue = '(?s)<v>\s*([^<]*?)\s*<\/v'
-		Local $patText = '(?s)<t>\s*([^<]*?)\s*<\/t'
-		Local $patRichText = '(?s)<r>\s*([^<]*?)\s*<\/r'
+		$patRows = '(?s)<row(?|\s+\/>|(?>\s+([^>]*))?>\s*(.+?)\s*<\/row)'
+		$patCells = '(?s)<c\s*(?|([^>]*)\/>|([^>]*)>\s*(.*?)\s*<\/c\b)'
+		$patValue = '(?s)<v>\s*([^<]*?)\s*<\/v'
+		;~ $patText = '(?s)<t>\s*([^<]*?)\s*<\/t'
+		;~ $patRichText = '(?s)<r>\s*([^<]*?)\s*<\/r'
 	EndIf
 
 	; read rows first:
@@ -390,7 +392,6 @@ Func __xlsx_readCells($sFilePath, ByRef $aStrings, Const $dRowFrom = 1, $dRowTo 
 
 
 		; iterate over cells of this row:
-		$iColCount = 0
 		$iCol      = -1
 		For $aCell in $aCells
 
@@ -471,7 +472,7 @@ Func __xlsx_readCells($sFilePath, ByRef $aStrings, Const $dRowFrom = 1, $dRowTo 
 				
 				Case "str" ; formula
 					; here the formula itself is in an [optional] <f></f> while the last calculated value is normally in <v></v> - so nothing to do because $sValue has already value of <v>...</v>
-				
+
 				Case "n" ; number (integers, floats, dates, times)
 					$sValue = Number($sValue)
 
@@ -479,8 +480,9 @@ Func __xlsx_readCells($sFilePath, ByRef $aStrings, Const $dRowFrom = 1, $dRowTo 
 				Case "b" ; boolean
 					$sValue = $sValue = True
 
-				Case Else ; normal value
+				Case Else ; normal value / defaults to "n"
 					If StringRegExp($sValue, '(?i)\A(?|0x\d+|[-+]?(?>\d+)(?>\.\d+)?(?:e[-+]?\d+)?)\Z') Then $sValue = Number($sValue) ; if number then convert to number type
+
 			EndSwitch
 
 			; determine empty rows and columns
@@ -529,7 +531,7 @@ Func __xlsx_getSubFiles($pthWorkDir = @TempDir & "\xlsxWork\")
 	Local $mRet[]
 
 	;  determine main workbook file and their path
-	Local $sSubPath = $pthWorkDir, $sWorkbook
+	Local $sSubPath = $pthWorkDir
 	If Not $oXML.load($pthWorkDir & "\_rels\.rels") Then Return SetError(1, 0, False)
 	Local $sPre = $oXML.documentElement.prefix
 	If $sPre <> "" Then $sPre &= ":"
@@ -545,7 +547,7 @@ Func __xlsx_getSubFiles($pthWorkDir = @TempDir & "\xlsxWork\")
 
 	; determine the relevant files
 	If Not $oXML.load($pthWorkDir & $sSubPath & "_rels\" & $mRet.WorkbookFileName & ".rels") Then Return SetError(3, 0, False)
-	Local $sPre = $oXML.documentElement.prefix
+	$sPre = $oXML.documentElement.prefix
 	If $sPre <> "" Then $sPre &= ":"
 	Local $sTarget, $sId, $mSheetsByID[]
 	For $oRS In $oXML.selectNodes('//' & $sPre & 'Relationship')
@@ -565,7 +567,7 @@ Func __xlsx_getSubFiles($pthWorkDir = @TempDir & "\xlsxWork\")
 
 	; determine the the sheet names and their order
 	If Not $oXML.load($mRet["WorkbookPath"] & $mRet.WorkbookFileName) Then Return SetError(4, 0, False)
-	Local $sPre = $oXML.documentElement.prefix
+	$sPre = $oXML.documentElement.prefix
 	If $sPre <> "" Then $sPre &= ":"
 	Local  $mSheets[]
 	For $oSheet In $oXML.selectNodes('//' & $sPre & 'sheets/' & $sPre & 'sheet')
@@ -674,9 +676,11 @@ EndFunc
 ; Last changed ..: 2020-08-07
 ; =================================================================================================
 Func __xlsxExcel2Date($dExcelDate, Const $sType = Default, Const $iFlags = 0x01, Const $sFormat = "", Const $iFlagsTime = 0, Const $sFormatTime = "")
+	Local $fTimeRaw, $y, $m, $d, $h, $min, $s, $tDateTime
 	Switch $sType
 		Case Default
-			Local $aRet[6], $fTimeRaw = $dExcelDate - Int($dExcelDate)
+			Local $aRet[6]
+			$fTimeRaw = $dExcelDate - Int($dExcelDate)
 
 			_DayValueToDate(2415018.5 + Int($dExcelDate), $aRet[0], $aRet[1], $aRet[2])
 
@@ -689,12 +693,11 @@ Func __xlsxExcel2Date($dExcelDate, Const $sType = Default, Const $iFlags = 0x01,
 
 			Return $aRet
 		Case "date"
-			Local $y, $m, $d
 			_DayValueToDate(2415018.5 + Int($dExcelDate), $y, $m, $d)
-			Local $tDateTime = _Date_Time_EncodeSystemTime($m, $d, $y)
+			$tDateTime = _Date_Time_EncodeSystemTime($m, $d, $y)
 			Return _WinAPI_GetDateFormat(0x0400, $tDateTime, $iFlags, $sFormat)
 		Case "time"
-			Local $h, $min, $s, $fTimeRaw = $dExcelDate - Int($dExcelDate)
+			$fTimeRaw = $dExcelDate - Int($dExcelDate)
 			; process the time
 			$h = Floor($fTimeRaw * 24)
 			$fTimeRaw -= $h / 24 ; = Mod($fTimeRaw, 1/24)
@@ -703,7 +706,7 @@ Func __xlsxExcel2Date($dExcelDate, Const $sType = Default, Const $iFlags = 0x01,
 			$s = Floor($fTimeRaw * 86400)
 			Return StringFormat("%02d:%02d:%02d", $h, $min, $s)
 		Case "datetime"
-			Local $y, $m, $d, $h, $min, $s, $fTimeRaw = $dExcelDate - Int($dExcelDate)
+			$fTimeRaw = $dExcelDate - Int($dExcelDate)
 			; process the time
 			$h = Floor($fTimeRaw * 24)
 			$fTimeRaw -= $h / 24 ; = Mod($fTimeRaw, 1/24)
@@ -712,7 +715,7 @@ Func __xlsxExcel2Date($dExcelDate, Const $sType = Default, Const $iFlags = 0x01,
 			$s = Floor($fTimeRaw * 86400)
 
 			_DayValueToDate(2415018.5 + Int($dExcelDate), $y, $m, $d)
-			Local $tDateTime = _Date_Time_EncodeSystemTime($m, $d, $y, $h, $min, $s)
+			$tDateTime = _Date_Time_EncodeSystemTime($m, $d, $y, $h, $min, $s)
 			Return _WinAPI_GetDateFormat(0x0400, $tDateTime, $iFlags, $sFormat) & " " & _WinAPI_GetTimeFormat(0, $tDateTime, $iFlagsTime, $sFormatTime)
 		Case Else
 			Return SetError(1, 0, False)
