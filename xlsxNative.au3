@@ -148,7 +148,7 @@ Func _xlsx_WriteFromArray(Const $sFile, ByRef $aArray)
 	If $dSuccess = 0 Then Return SetError(2, 3, False)
 	$dSuccess = DirCreate($pthWorkDir & 'xl\w')
 	If $dSuccess = 0 Then Return SetError(2, 5, False)
-	Local $sSheet = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'
+	Local $sSheet = '<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'
 	Local $iLastNonEmptyRow = -1, $iLastNonEmptyCol, $sCellElemString
 	For $r = $iFirstWrittenRow To $iLastWrittenRow
 
@@ -208,7 +208,7 @@ Func _xlsx_WriteFromArray(Const $sFile, ByRef $aArray)
 					Switch UBound($aRE, 1)
 						Case 1 ; a date or time only
 							If StringLen($aRE[0]) < 6 Then ; time only
-								$sSheet &= StringFormat('<' & $sCellElemString & ' s="2"><v>%.10f</v></c>', StringLeft($vVal, 2) / 24.0 + StringMid($vVal, 4, 2) / 1440.0)
+								$sSheet &= '<' & $sCellElemString & ' s="2"><v>' & StringRegExpReplace(StringFormat('%.10f', StringLeft($vVal, 2) / 24.0 + StringMid($vVal, 4, 2) / 1440.0), '\.0+$|(\.\d*?)0+$', '$1') & '</v></c>'
 
 							Else ; date value
 								$sSheet &= '<' & $sCellElemString & ' s="1"><v>' & __xlsx_date2serial(Int(StringLeft($aRE[0], 4)), Int(StringMid($aRE[0], 6, 2)), Int(StringMid($aRE[0], 9, 2))) & '</v></c>'
@@ -217,9 +217,9 @@ Func _xlsx_WriteFromArray(Const $sFile, ByRef $aArray)
 							$bDates = True
 
 						Case 2 ; date + time
-							$sSheet &= StringFormat('<' & $sCellElemString & ' s="3"><v>%.10f</v></c>', _
+							$sSheet &= '<' & $sCellElemString & ' s="3"><v>' & StringRegExpReplace(StringFormat('%.10f', _
 								__xlsx_date2serial(Int(StringLeft($aRE[0], 4)), Int(StringMid($aRE[0], 6, 2)), Int(StringMid($aRE[0], 9, 2))) _
-								+ Number(StringLeft($aRE[1], 2)) / 24 + Number(StringMid($aRE[1], 4, 2)) / 1440)
+								+ Number(StringLeft($aRE[1], 2)) / 24 + Number(StringMid($aRE[1], 4, 2)) / 1440), '\.0+$|(\.\d*?)0+$', '$1') & '</v></c>'
 							$bDates = True
 
 					EndSwitch
@@ -236,31 +236,31 @@ Func _xlsx_WriteFromArray(Const $sFile, ByRef $aArray)
 	$dSuccess = DirCreate($pthWorkDir)
 	If $dSuccess = 0 Then Return SetError(2, 1, False)
 	$dSuccess = FileWrite($pthWorkDir & '[Content_Types].xml', StringFormat( _
-		'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/xl/w.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/w/s.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>%s</Types>', _
+		'<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/xl/w.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/w/s.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>%s</Types>', _
 		$bDates ? '<Override PartName="/xl/st.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' : ''))
 	If $dSuccess = 0 Then Return SetError(3, 1, False)
 
 	; .rels
 	$dSuccess = DirCreate($pthWorkDir & '_rels')
 	If $dSuccess = 0 Then Return SetError(2, 2, False)
-	$dSuccess = FileWrite($pthWorkDir & '_rels\.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/w.xml"/></Relationships>')
+	$dSuccess = FileWrite($pthWorkDir & '_rels\.rels', '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/w.xml"/></Relationships>')
 	If $dSuccess = 0 Then Return SetError(3, 2, False)
 
 	; workbook.xml
-	$dSuccess = FileWrite($pthWorkDir & 'xl\w.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="1" sheetId="1" r:id="rId1" /></sheets></workbook>')
+	$dSuccess = FileWrite($pthWorkDir & 'xl\w.xml', '<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="1" sheetId="1" r:id="rId1" /></sheets></workbook>')
 	If $dSuccess = 0 Then Return SetError(3, 3, False)
 
 	; workbook.xml.rels
 	$dSuccess = DirCreate($pthWorkDir & 'xl\_rels')
 	If $dSuccess = 0 Then Return SetError(2, 4, False)
 	$dSuccess = FileWrite($pthWorkDir & 'xl\_rels\w.xml.rels', StringFormat( _
-		'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="w/s.xml"/>%s</Relationships>', _
-		$bDates ? '<Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="st.xml"/>' : ''))
+		'<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="w/s.xml"/>%s</Relationships>', _
+		$bDates ? '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="st.xml"/>' : ''))
 	If $dSuccess = 0 Then Return SetError(3, 4, False)
 
 	; styles.xml
 	If $bDates Then 
-		$dSuccess = FileWrite($pthWorkDir & 'xl\st.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf/></cellStyleXfs><cellXfs count="4"><xf xfId="0"/><xf xfId="0" numFmtId="14" applyNumberFormat="1"/><xf xfId="0" numFmtId="20" applyNumberFormat="1"/><xf xfId="0" numFmtId="22" applyNumberFormat="1"/></cellXfs></styleSheet>')
+		$dSuccess = FileWrite($pthWorkDir & 'xl\st.xml', '<?xml version="1.0"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font/></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf/></cellStyleXfs><cellXfs count="4"><xf xfId="0"/><xf xfId="0" numFmtId="14"/><xf xfId="0" numFmtId="20"/><xf xfId="0" numFmtId="22"/></cellXfs></styleSheet>')
 		If $dSuccess = 0 Then Return SetError(3, 5, False)
 	EndIf
 
