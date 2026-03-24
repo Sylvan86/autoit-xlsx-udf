@@ -35,7 +35,7 @@
 ;                              = 4 - worksheet # doesn't exists
 ;                              = 5 - wrong filepath for sheet-document
 ; Author ........: AspirinJunkie
-; Last changed ..: 2023-01-26
+; Last changed ..: 2025-10-09
 ; =================================================================================================
 Func _xlsx_2Array(Const $sFile, Const $iSheetNr = 1, $dRowFrom = 1, $dRowTo = Default, $dColFrom = 1, $dColTo = Default)
 	Local $pthWorkDir = @TempDir & "\xlsxWork\"
@@ -89,8 +89,14 @@ Func _xlsx_2Array(Const $sFile, Const $iSheetNr = 1, $dRowFrom = 1, $dRowTo = De
 		If @error Then Local $aStrings[0]
 	EndIf
 
+	; read styles to detect date-formatted cells
+	Local $mDateStyles[]
+	If MapExists($mFiles, "StylesFile") And FileExists($mFiles["StylesFile"]) Then
+		$mDateStyles = __xlsx_readDateStyles($mFiles["StylesFile"])
+	EndIf
+
 	; read all cells into an 2D-array
-	Local $aCells = __xlsx_readCells($pthSheet, $aStrings, $dRowFrom, $dRowTo, $dColFrom, $dColTo)
+	Local $aCells = __xlsx_readCells($pthSheet, $aStrings, $dRowFrom, $dRowTo, $dColFrom, $dColTo, $mDateStyles)
 	If @error Then Return SetError(2, @error, False)
 
 	; remove temporary data
@@ -113,7 +119,7 @@ EndFunc   ;==>_xlsx_2Array
 ;                              = 3 - error during FileWrite (see @extended for which exactly)
 ;                              = 4 - error zipping the file
 ; Author ........: AspirinJunkie
-; Last changed ..: 2021-03-29
+; Last changed ..: 2025-10-09
 ; =================================================================================================
 Func _xlsx_WriteFromArray(Const $sFile, ByRef $aArray)
 	Local Const $patDATETIME = '(?:^(?<date>(?>19|20)\d\d-[01]\d-(?>[012]\d|3[01]))[T ]?(?<time>\d\d\:\d\d(?>\:\d\d(?>[\.,]\d+))?)$|\g<date>|\g<time>)'
@@ -142,7 +148,7 @@ Func _xlsx_WriteFromArray(Const $sFile, ByRef $aArray)
 	If $dSuccess = 0 Then Return SetError(2, 3, False)
 	$dSuccess = DirCreate($pthWorkDir & 'xl\w')
 	If $dSuccess = 0 Then Return SetError(2, 5, False)
-	Local $sSheet = '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'
+	Local $sSheet = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'
 	Local $iLastNonEmptyRow = -1, $iLastNonEmptyCol, $sCellElemString
 	For $r = $iFirstWrittenRow To $iLastWrittenRow
 
@@ -202,16 +208,18 @@ Func _xlsx_WriteFromArray(Const $sFile, ByRef $aArray)
 					Switch UBound($aRE, 1)
 						Case 1 ; a date or time only
 							If StringLen($aRE[0]) < 6 Then ; time only
-								$sSheet &= StringFormat('<' & $sCellElemString & ' s="2"><v>%f</v></c>', StringLeft($vVal, 2) / 24.0 + StringMid($vVal, 4, 2) / 1440.0)
+								$sSheet &= StringFormat('<' & $sCellElemString & ' s="2"><v>%.10f</v></c>', StringLeft($vVal, 2) / 24.0 + StringMid($vVal, 4, 2) / 1440.0)
 
 							Else ; date value
-								$sSheet &= '<' & $sCellElemString & ' t="d" s="1"><v>' & $vVal & '</v></c>' ; date value
+								$sSheet &= '<' & $sCellElemString & ' s="1"><v>' & __xlsx_date2serial(Int(StringLeft($aRE[0], 4)), Int(StringMid($aRE[0], 6, 2)), Int(StringMid($aRE[0], 9, 2))) & '</v></c>'
 
 							EndIf
 							$bDates = True
 
-						Case 2 ; date + time 
-							$sSheet &= '<' & $sCellElemString & ' t="d" s="3"><v>' & $vVal & '</v></c>'
+						Case 2 ; date + time
+							$sSheet &= StringFormat('<' & $sCellElemString & ' s="3"><v>%.10f</v></c>', _
+								__xlsx_date2serial(Int(StringLeft($aRE[0], 4)), Int(StringMid($aRE[0], 6, 2)), Int(StringMid($aRE[0], 9, 2))) _
+								+ Number(StringLeft($aRE[1], 2)) / 24 + Number(StringMid($aRE[1], 4, 2)) / 1440)
 							$bDates = True
 
 					EndSwitch
@@ -228,31 +236,31 @@ Func _xlsx_WriteFromArray(Const $sFile, ByRef $aArray)
 	$dSuccess = DirCreate($pthWorkDir)
 	If $dSuccess = 0 Then Return SetError(2, 1, False)
 	$dSuccess = FileWrite($pthWorkDir & '[Content_Types].xml', StringFormat( _
-		'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml" /><Override PartName="/xl/w.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml" /><Override PartName="/xl/w/s.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml" />%s</Types>', _ 
+		'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/xl/w.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/w/s.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>%s</Types>', _
 		$bDates ? '<Override PartName="/xl/st.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' : ''))
 	If $dSuccess = 0 Then Return SetError(3, 1, False)
 
 	; .rels
 	$dSuccess = DirCreate($pthWorkDir & '_rels')
 	If $dSuccess = 0 Then Return SetError(2, 2, False)
-	$dSuccess = FileWrite($pthWorkDir & '_rels\.rels', '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/w.xml"/></Relationships>')
+	$dSuccess = FileWrite($pthWorkDir & '_rels\.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/w.xml"/></Relationships>')
 	If $dSuccess = 0 Then Return SetError(3, 2, False)
 
 	; workbook.xml
-	$dSuccess = FileWrite($pthWorkDir & 'xl\w.xml', '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="1" sheetId="1" r:id="rId1" /></sheets></workbook>')
+	$dSuccess = FileWrite($pthWorkDir & 'xl\w.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="1" sheetId="1" r:id="rId1" /></sheets></workbook>')
 	If $dSuccess = 0 Then Return SetError(3, 3, False)
 
 	; workbook.xml.rels
 	$dSuccess = DirCreate($pthWorkDir & 'xl\_rels')
 	If $dSuccess = 0 Then Return SetError(2, 4, False)
 	$dSuccess = FileWrite($pthWorkDir & 'xl\_rels\w.xml.rels', StringFormat( _
-		'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="w/s.xml"/>%s</Relationships>', _ 
+		'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="w/s.xml"/>%s</Relationships>', _
 		$bDates ? '<Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="st.xml"/>' : ''))
 	If $dSuccess = 0 Then Return SetError(3, 4, False)
 
 	; styles.xml
 	If $bDates Then 
-		$dSuccess = FileWrite($pthWorkDir & 'xl\st.xml', '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font/></fonts><fills count="1"><fill><patternFill patternType="none"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf/></cellStyleXfs><cellXfs count="4"><xf xfId="0"/><xf xfId="0" numFmtId="14" applyNumberFormat="1"/><xf xfId="0" numFmtId="20" applyNumberFormat="1"/><xf xfId="0" numFmtId="22" applyNumberFormat="1"/></cellXfs></styleSheet>')
+		$dSuccess = FileWrite($pthWorkDir & 'xl\st.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf/></cellStyleXfs><cellXfs count="4"><xf xfId="0"/><xf xfId="0" numFmtId="14" applyNumberFormat="1"/><xf xfId="0" numFmtId="20" applyNumberFormat="1"/><xf xfId="0" numFmtId="22" applyNumberFormat="1"/></cellXfs></styleSheet>')
 		If $dSuccess = 0 Then Return SetError(3, 5, False)
 	EndIf
 
@@ -330,7 +338,7 @@ EndFunc   ;==>_xlsx_2Array
 ; Author ........: AspirinJunkie
 ; Last changed ..: 2023-03-13
 ; =================================================================================================
-Func __xlsx_readCells($sFilePath, ByRef $aStrings, Const $dRowFrom = 1, $dRowTo = Default, $dColFrom = 1, $dColTo = Default)
+Func __xlsx_readCells($sFilePath, ByRef $aStrings, Const $dRowFrom = 1, $dRowTo = Default, $dColFrom = 1, $dColTo = Default, $mDateStyles = Null)
 	Local $sFileRaw = FileRead($sFilePath)
 	If @error Then Return SetError(1,@error, Null)
 
@@ -401,11 +409,14 @@ Func __xlsx_readCells($sFilePath, ByRef $aStrings, Const $dRowFrom = 1, $dRowTo 
 				$iCol += 1
 				ContinueLoop
 			EndIf
-			Local $sType = ""
+			Local $sType = "", $iCellStyle = -1
 
 			If $aCell[1] <> "" Then ; cell attributes
 				$aRETmp = StringRegExp($aCell[1], '\bt="(.*?)"', 3)
 				If Not @error Then $sType = $aRETmp[0]
+
+				$aRETmp = StringRegExp($aCell[1], '\bs="(\d+)"', 3)
+				If Not @error Then $iCellStyle = Int($aRETmp[0])
 
 				; check if cell has a cell coordinate attribute
 				$aRETmp = StringRegExp($aCell[1], '\br="(.*?)"', 3)
@@ -483,7 +494,28 @@ Func __xlsx_readCells($sFilePath, ByRef $aStrings, Const $dRowFrom = 1, $dRowTo 
 					$sValue = $sValue = True
 
 				Case Else ; normal value / defaults to "n"
-					If StringRegExp($sValue, '(?i)\A(?|0x\d+|[-+]?(?>\d+)(?>\.\d+)?(?:e[-+]?\d+)?)\Z') Then $sValue = Number($sValue) ; if number then convert to number type
+					If StringRegExp($sValue, '(?i)\A(?|0x\d+|[-+]?(?>\d+)(?>\.\d+)?(?:e[-+]?\d+)?)\Z') Then
+						$sValue = Number($sValue) ; if number then convert to number type
+						; check if this is a date/time value based on cell style
+						If $iCellStyle >= 0 And IsMap($mDateStyles) And MapExists($mDateStyles, $iCellStyle) Then
+							Local $iIntPart = Int($sValue)
+							Local $iTotalSec = Round(($sValue - $iIntPart) * 86400) ; round to nearest second to avoid precision loss
+							Local $iH = Floor($iTotalSec / 3600)
+							Local $iMin = Floor(Mod($iTotalSec, 3600) / 60)
+							Local $iS = Mod($iTotalSec, 60)
+							Local $aDP[3]
+							Switch $mDateStyles[$iCellStyle]
+								Case "date"
+									_DayValueToDate(2415018.5 + $iIntPart, $aDP[0], $aDP[1], $aDP[2])
+									$sValue = StringFormat("%04d-%02d-%02d", $aDP[0], $aDP[1], $aDP[2])
+								Case "time"
+									$sValue = $iS > 0 ? StringFormat("%02d:%02d:%02d", $iH, $iMin, $iS) : StringFormat("%02d:%02d", $iH, $iMin)
+								Case "datetime"
+									_DayValueToDate(2415018.5 + $iIntPart, $aDP[0], $aDP[1], $aDP[2])
+									$sValue = $iS > 0 ? StringFormat("%04d-%02d-%02d %02d:%02d:%02d", $aDP[0], $aDP[1], $aDP[2], $iH, $iMin, $iS) : StringFormat("%04d-%02d-%02d %02d:%02d", $aDP[0], $aDP[1], $aDP[2], $iH, $iMin)
+							EndSwitch
+						EndIf
+					EndIf
 
 			EndSwitch
 
@@ -562,6 +594,8 @@ Func __xlsx_getSubFiles($pthWorkDir = @TempDir & "\xlsxWork\")
 				$mSheetsByID[$sId] = __xlsx_Target2AbsolutePath($sTarget, $pthWorkDir, $sSubPath)
 			Case "sharedStrings"
 				$mRet["SharedStringsFile"] = __xlsx_Target2AbsolutePath($sTarget, $pthWorkDir, $sSubPath)
+			Case "styles"
+				$mRet["StylesFile"] = __xlsx_Target2AbsolutePath($sTarget, $pthWorkDir, $sSubPath)
 			Case Else
 				ContinueLoop
 		EndSwitch
@@ -626,6 +660,70 @@ Func __xlsx_readSharedStrings(Const $sFile)
 	Return $aRet
 EndFunc   ;==>__xlsx_readSharedStrings
 
+
+; #INTERNAL_USE_ONLY# ===========================================================================================================
+; Name ..........: __xlsx_readDateStyles
+; Description ...: parses styles.xml and returns a map of cellXf indices that represent date/time formats
+; Syntax ........: __xlsx_readDateStyles(Const $sFile)
+; Parameters ....: $sFile               - path to the styles.xml file
+; Return values .: a map where key = xf index (Int), value = "date"|"time"|"datetime"
+; Author ........: AspirinJunkie
+; ===============================================================================================================================
+Func __xlsx_readDateStyles(Const $sFile)
+	Local $mRet[], $mDateFmtIds[]
+
+	; built-in date numFmtIds
+	Local $aDateIds[] = [14, 15, 16, 17, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36]
+	For $i In $aDateIds
+		$mDateFmtIds[$i] = "date"
+	Next
+	Local $aTimeIds[] = [18, 19, 20, 21, 45, 46, 47]
+	For $i In $aTimeIds
+		$mDateFmtIds[$i] = "time"
+	Next
+	$mDateFmtIds[22] = "datetime"
+
+	; load XML
+	Local $oXML = __xlsx_getXMLObject()
+	If @error Or Not $oXML.load($sFile) Then Return $mRet
+
+	Local $sPre = $oXML.documentElement.prefix
+	If $sPre <> "" Then $sPre &= ":"
+
+	; parse custom numFmts
+	For $oFmt In $oXML.selectNodes('//' & $sPre & 'numFmt')
+		Local $iId = Int($oFmt.getAttribute("numFmtId"))
+		Local $sCode = $oFmt.getAttribute("formatCode")
+		; check if format code contains date/time characters (ignore quoted sections)
+		Local $sUnquoted = StringRegExpReplace($sCode, '"[^"]*"', '')
+		If StringRegExp($sUnquoted, '[yYdDhHsS]') Then
+			If StringRegExp($sUnquoted, '[yYdD]') And StringRegExp($sUnquoted, '[hHsS]') Then
+				$mDateFmtIds[$iId] = "datetime"
+			ElseIf StringRegExp($sUnquoted, '[yYdD]') Then
+				$mDateFmtIds[$iId] = "date"
+			Else
+				$mDateFmtIds[$iId] = "time"
+			EndIf
+		EndIf
+	Next
+
+	; parse cellXfs: map xf index to date type
+	Local $iIdx = 0
+	For $oXf In $oXML.selectNodes('//' & $sPre & 'cellXfs/' & $sPre & 'xf')
+		Local $sNumFmtId = $oXf.getAttribute("numFmtId")
+		If $sNumFmtId <> "" And $sNumFmtId <> Null Then
+			Local $iNumFmtId = Int($sNumFmtId)
+			If MapExists($mDateFmtIds, $iNumFmtId) Then
+				$mRet[$iIdx] = $mDateFmtIds[$iNumFmtId]
+			EndIf
+		EndIf
+		$iIdx += 1
+	Next
+
+	Return $mRet
+EndFunc   ;==>__xlsx_readDateStyles
+
+
 ; converts excel formatted cell coordinate to array [column, row]
 Func __xlsx_CellstringToRowColumn($sID)
 	Local $aSplit = StringRegExp($sID, "^([A-Z]+)(\d+)$", 1)
@@ -653,8 +751,28 @@ Func __xlsx_createCellString($iRow, $iCol)
         $iCol = Int($iCol / 26)                 
     WEnd
 
-    Return $sRet & $iRow 
+    Return $sRet & $iRow
 EndFunc
+
+
+; #INTERNAL_USE_ONLY# ===========================================================================================================
+; Name ..........: __xlsx_date2serial
+; Description ...: converts a date (Y, M, D) to an Excel serial number (including Lotus 1-2-3 bug correction)
+; Syntax ........: __xlsx_date2serial($iY, $iM, $iD)
+; Parameters ....: $iY                  - year (1900-9999)
+;                  $iM                  - month (1-12)
+;                  $iD                  - day (1-31)
+; Return values .: the Excel serial number
+; Author ........: AspirinJunkie
+; ===============================================================================================================================
+Func __xlsx_date2serial($iY, $iM, $iD)
+	Local $a = Int((14 - $iM) / 12)
+	Local $y = $iY + 4800 - $a
+	Local $m = $iM + 12 * $a - 3
+	Local $iSerial = $iD + Int((153 * $m + 2) / 5) + 365 * $y + Int($y / 4) - Int($y / 100) + Int($y / 400) - 2447065
+	If $iSerial > 59 Then $iSerial += 1 ; Lotus 1-2-3 bug: phantom Feb 29, 1900
+	Return $iSerial
+EndFunc   ;==>__xlsx_date2serial
 
 
 ; #FUNCTION# ======================================================================================
@@ -769,8 +887,10 @@ Func __xlsx_unzip($sInput, $sOutput, Const $sPattern = "")
 		If Not DirCreate($sOutput) Then Return SetError(1, @error, False)
 	EndIf
 
-	If FileExists("7za.exe") Then
-		Local $dRet = RunWait(StringFormat('7za.exe x "%s" -o"%s" %s -r -tzip -bd -bb0 -aoa', $sInput, $sOutput, $sPattern), "", @SW_HIDE)
+	Local $s7za = @ScriptDir & "\7za.exe"
+	If FileExists($s7za) Then
+		Local $dRet = RunWait(StringFormat('"%s" x "%s" -o"%s" %s -r -tzip -bd -bb0 -aoa', $s7za, $sInput, $sOutput, $sPattern), "", @SW_HIDE)
+		If @error Then Return SetError(2, @error, False)
 		Return $dRet = 0 ? True : SetError(2, $dRet, False)
 
 	Else ; much slower
@@ -785,20 +905,28 @@ EndFunc   ;==>__xlsx_unzip
 
 ; compress a folder content into a zip-file (file extension doesn't have to be .zip)
 Func __xlsx_zip($sInput, $sOutput)
-	Local $iExitCode
+	Local $iExitCode, $s7za = @ScriptDir & "\7za.exe"
 
-	;  $iExitCode = RunWait(StringFormat('zip.exe -qr -9 "%s" .'', $sInput, $sOutput & ".zip"), "", @SW_HIDE)
-	;  If Not @error And $iExitCode = 0 Then
-
-	; "jar -cMf targetArchive.zip sourceDirectory"
-	$iExitCode = RunWait(StringFormat('7za.exe a -tzip -mm=Deflate -mx=9 -mfb=258 -mpass=15 -mtc=off -mtm=off -mta=off "%s" "%s"', $sOutput, $sInput), "", @SW_HIDE)
-	If @error Or $iExitCode <> 0 Then
-
-		$iExitCode = RunWait(StringFormat('powershell.exe -Command "Compress-Archive ''%s'' ''%s''"', $sInput, $sOutput & ".zip"), "", @SW_HIDE)
-		If Not @error And $iExitCode = 0 Then
-			FileMove($sOutput & ".zip", $sOutput)
-		EndIf
+	If FileExists($s7za) Then
+		$iExitCode = RunWait(StringFormat('"%s" a -tzip -mm=Deflate -mx=9 -mfb=258 -mpass=15 -mtc=off -mtm=off -mta=off "%s" "%s"', $s7za, $sOutput, $sInput), "", @SW_HIDE)
+		If Not @error And $iExitCode = 0 Then Return 1
 	EndIf
+
+	; Fallback: .NET ZipArchive creates ZIP with forward slashes (required by ZIP/OOXML standard for LibreOffice compatibility)
+	Local $sInputDir = StringRegExpReplace($sInput, '[\\/]\*$', '')
+	Local $sTmpPS = @TempDir & "\xlsxZip.ps1"
+	FileDelete($sTmpPS)
+	FileWrite($sTmpPS, _
+		'Add-Type -A System.IO.Compression.FileSystem' & @CRLF & _
+		'$z=[IO.Compression.ZipFile]::Open(''' & StringReplace($sOutput, "'", "''") & ''',''Create'')' & @CRLF & _
+		'Get-ChildItem ''' & StringReplace($sInputDir, "'", "''") & ''' -Recurse -File | ForEach-Object {' & @CRLF & _
+		'  $n=$_.FullName.Substring(' & (StringLen($sInputDir) + 1) & ').Replace(''\'',''/'')' & @CRLF & _
+		'  [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($z,$_.FullName,$n,''Optimal'')|Out-Null' & @CRLF & _
+		'}' & @CRLF & _
+		'$z.Dispose()')
+	$iExitCode = RunWait('powershell.exe -ExecutionPolicy Bypass -File "' & $sTmpPS & '"', "", @SW_HIDE)
+	FileDelete($sTmpPS)
+	If @error Or $iExitCode <> 0 Then Return SetError(1, $iExitCode, False)
 	Return 1
 EndFunc   ;==>__xlsx_zip
 
